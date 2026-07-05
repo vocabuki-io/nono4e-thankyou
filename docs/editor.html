@@ -23,6 +23,7 @@ input[type="color"]::-webkit-color-swatch{border:none;border-radius:5px}
 </head>
 <body>
 <div id="app"></div>
+<script src="store.js"></script>
 <script>
 (function () {
   const KEY = 'yosegaki-editor-v1';
@@ -158,6 +159,39 @@ input[type="color"]::-webkit-color-swatch{border:none;border-radius:5px}
       this._tt = setTimeout(() => this.setState({ toast: '' }), 1800);
     }
 
+    // 現在の設定を data/theme.json(+中心地画像)として保存し、viewer/contribute に反映する
+    async publish() {
+      if (this._publishing) return;
+      if (!Yosegaki.getToken()) {
+        const t = prompt('投稿キー（幹事用のGitHubトークン）を入力してください');
+        if (!t || !t.trim()) return;
+        Yosegaki.setToken(t.trim());
+      }
+      const S = this.state.settings;
+      const theme = {
+        envW: S.envW, envRatio: S.envRatio, envRadius: S.envRadius,
+        envColor: S.envColor, flapColor: S.flapColor,
+        shadow: S.shadow, tilt: S.tilt, nameSize: S.nameSize, nameColor: S.nameColor,
+        pinSize: S.pinSize, pinColor: S.pinColor, pinOffset: S.pinOffset,
+        bgPattern: S.bgPattern, bgColor: S.bgColor, patDensity: S.patDensity,
+        font: S.font, centerSize: S.centerSize,
+        centerImg: !!this.state.centerImg
+      };
+      this._publishing = true;
+      this.flashToast('保存中…');
+      try {
+        if (this.state.centerImg) await Yosegaki.saveCenterImage(this.state.centerImg);
+        else await Yosegaki.removeCenterImage();
+        await Yosegaki.saveTheme(theme);
+        this.flashToast('公開デザインを保存しました（反映まで1〜2分）');
+      } catch (e) {
+        if (e && e.status === 401) Yosegaki.setToken('');
+        this.flashToast((e && e.message) || '保存に失敗しました');
+      } finally {
+        this._publishing = false;
+      }
+    }
+
     copyJson() {
       const json = JSON.stringify(this.state.settings, null, 2);
       const done = () => this.flashToast('設定をコピーしました');
@@ -279,6 +313,7 @@ input[type="color"]::-webkit-color-swatch{border:none;border-radius:5px}
           sl('centerSize', '中心地のサイズ', 120, 360, 10),
           sl('zoom', 'ズーム', 0.5, 1.8, 0.05),
           { type: 'action', label: '配置をシャッフル', action: 'shuffle' },
+          { type: 'action', label: '公開デザインとして保存', action: 'publish' },
           { type: 'action', label: '設定JSONをコピー', action: 'copy-json' }
         ]
       };
@@ -439,6 +474,8 @@ input[type="color"]::-webkit-color-swatch{border:none;border-radius:5px}
         this.saveSet({ [t.dataset.key]: t.dataset.value });
       } else if (action === 'shuffle') {
         this.saveSet({ seed: (Math.random() * 1e6) | 0 });
+      } else if (action === 'publish') {
+        this.publish();
       } else if (action === 'copy-json') {
         this.copyJson();
       } else if (action === 'center-clear') {
