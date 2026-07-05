@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>寄せ書き｜管理者</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;height:100%}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{font-family:'Zen Maru Gothic',sans-serif;background:#eef0f3;color:#333;padding:0 0 60px}
+  .wrap{max-width:520px;margin:0 auto;padding:20px 16px}
+  h1{font-size:20px;font-weight:900;color:#3a3d42;margin:6px 0 2px}
+  .sub{font-size:12.5px;color:#8a9099;margin:0 0 18px}
+  .card{background:#fff;border-radius:16px;box-shadow:0 2px 12px rgba(0,0,0,.08);padding:16px 16px 18px;margin-bottom:16px}
+  .card h2{font-size:15px;font-weight:800;margin:0 0 12px;color:#3b4652}
+  label{display:block;font-size:12.5px;font-weight:700;color:#555b63;margin:10px 0 4px}
+  input[type=text],input[type=password],input[type=datetime-local],textarea,select{
+    width:100%;border:1.5px solid #e0e3e8;border-radius:10px;padding:10px 12px;font-size:14px;font-family:inherit;color:#333;outline:none;background:#fff}
+  textarea{resize:vertical;min-height:64px;line-height:1.6}
+  .row{display:flex;gap:10px;align-items:flex-end}
+  .row>div{flex:1}
+  button{font-family:inherit;font-weight:800;border:none;border-radius:10px;cursor:pointer}
+  .btn{background:#3b6ea5;color:#fff;padding:11px 16px;font-size:14px}
+  .btn:disabled{background:#dfe2e6;color:#a9adb3}
+  .btn.sec{background:#eef0f3;color:#3b6ea5}
+  .btn.danger{background:transparent;color:#c0392b;padding:6px 8px;font-size:12.5px}
+  .seg{display:flex;gap:6px;flex-wrap:wrap}
+  .seg button{background:#eef0f3;color:#555b63;padding:8px 14px;font-size:12.5px;border-radius:999px}
+  .seg button.on{background:#3b4652;color:#fff}
+  .hint{font-size:11.5px;color:#9aa1ab;line-height:1.6;margin:4px 0 0}
+  .link-item{border:1px solid #edeef1;border-radius:12px;padding:10px 12px;margin-top:8px}
+  .link-item .top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .link-item .nm{font-weight:800;font-size:14px}
+  .link-item .cid{font-size:11.5px;color:#9aa1ab}
+  .link-url{width:100%;margin-top:8px;font-size:11px;color:#3b6ea5;background:#f6f8fa;border:1px solid #e7ebf0;border-radius:8px;padding:8px;word-break:break-all}
+  .badge{font-size:10.5px;font-weight:800;border-radius:999px;padding:2px 8px}
+  .badge.posted{background:#e5f3e8;color:#2f8a3e}
+  .badge.waiting{background:#fdeee6;color:#c77b32}
+  .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:rgba(40,44,50,.94);color:#fff;font-size:13px;font-weight:700;border-radius:999px;padding:11px 18px;z-index:50;max-width:90vw}
+  .muted{opacity:.5;pointer-events:none}
+  a.small{font-size:12px;color:#3b6ea5}
+</style>
+</head>
+<body>
+<div class="wrap" id="root"></div>
+<script src="config.js"></script>
+<script src="store.js"></script>
+<script>
+(function () {
+  const root = document.getElementById('root');
+  const A = Yosegaki.admin;
+  let state = { config: null, links: [], loading: false, newName: '', newCid: '' };
+  let toastTimer = null;
+
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function toast(msg){
+    let el = document.getElementById('toast');
+    if(!el){ el = document.createElement('div'); el.id='toast'; el.className='toast'; document.body.appendChild(el); }
+    el.textContent = msg; el.style.display='block';
+    clearTimeout(toastTimer); toastTimer = setTimeout(()=>{ el.style.display='none'; }, 2400);
+  }
+
+  async function refresh(){
+    if(!A.hasKey() || !A.getApi()) { render(); return; }
+    state.loading = true; render();
+    try {
+      const [cfg, links] = await Promise.all([A.getConfig(), A.listLinks()]);
+      state.config = cfg; state.links = links.links || [];
+    } catch(e){
+      if(e.status===401){ A.setKey(''); toast('管理者キーが正しくありません'); }
+      else toast(e.message||'読み込みに失敗しました');
+    }
+    state.loading = false; render();
+  }
+
+  function setupView(){
+    return `
+      <h1>寄せ書き｜管理者</h1>
+      <p class="sub">まず接続先と管理者キーを設定してください。</p>
+      <div class="card">
+        <h2>接続設定</h2>
+        <label>Worker の URL</label>
+        <input type="text" id="f-api" placeholder="https://yosegaki.xxx.workers.dev" value="${esc(A.getApi())}">
+        <p class="hint">Cloudflare Worker をデプロイした URL。config.js に書けば省略できます。</p>
+        <label>管理者キー</label>
+        <input type="password" id="f-key" placeholder="wrangler secret put ADMIN_KEY で設定した値">
+        <div style="margin-top:14px"><button class="btn" id="b-connect">接続する</button></div>
+      </div>`;
+  }
+
+  function seg(field, options, cur){
+    return `<div class="seg">${options.map(o=>`<button data-seg="${field}" data-val="${o.v}" class="${cur===o.v?'on':''}">${esc(o.label)}</button>`).join('')}</div>`;
+  }
+
+  function dashboardView(){
+    const c = state.config || {};
+    const dl = c.deadline ? c.deadline.slice(0,16) : '';
+    return `
+      <h1>寄せ書き｜管理者</h1>
+      <p class="sub">${esc(A.getApi())} ・ <a href="#" class="small" id="b-logout">ログアウト</a></p>
+
+      <div class="card">
+        <h2>収集の設定</h2>
+        <label>タイトル</label>
+        <input type="text" id="c-title" maxlength="60" value="${esc(c.title||'')}">
+        <label>冒頭の注意書き</label>
+        <textarea id="c-notice" maxlength="400">${esc(c.notice||'')}</textarea>
+        <label>投稿モード</label>
+        ${seg('photoMode',[{v:'photo',label:'写真＋コメント'},{v:'text',label:'コメントのみ（名前を封筒右上に表示）'}], c.photoMode||'photo')}
+        <label>締切</label>
+        <input type="datetime-local" id="c-deadline" value="${esc(dl)}">
+        <p class="hint">締切を過ぎると投稿できなくなります。空欄なら無期限。</p>
+        <div style="margin-top:14px"><button class="btn" id="b-savecfg">設定を保存</button></div>
+      </div>
+
+      <div class="card">
+        <h2>背景</h2>
+        <label>パターン</label>
+        ${seg('bgPattern',[{v:'plain',label:'プレーン'},{v:'stripe',label:'ストライプ'},{v:'dot',label:'ドット'},{v:'image',label:'画像'}], c.bgPattern||'stripe')}
+        <div class="row" style="margin-top:10px">
+          <button class="btn sec" id="b-bg">${c.bgImage?'背景画像を差し替え':'背景画像をアップロード'}</button>
+          ${c.bgImage?`<button class="btn danger" id="b-bg-clear">画像を削除</button>`:''}
+        </div>
+        <p class="hint">パターンを「画像」にして背景画像をアップロードすると、独自背景になります。</p>
+      </div>
+
+      <div class="card">
+        <h2>中心地デザイン</h2>
+        <div class="row">
+          <button class="btn sec" id="b-center">${c.centerImg?'中心地画像を差し替え':'中心地画像をアップロード'}</button>
+          ${c.centerImg?`<button class="btn danger" id="b-center-clear">画像を削除</button>`:''}
+        </div>
+        <p class="hint">封筒の見た目（色・サイズ等）の細かな調整は <a class="small" href="editor.html">調整エディタ</a> で行い、そこから公開できます。</p>
+      </div>
+
+      <div class="card">
+        <h2>個人リンクの発行</h2>
+        <label>表示名（Xのid または 名前）</label>
+        <input type="text" id="n-name" maxlength="24" placeholder="例) @ryamabay / 山田">
+        <label>カスタムid（英数字・_・-）</label>
+        <input type="text" id="n-cid" maxlength="40" placeholder="初期値: 表示名から自動">
+        <div style="margin-top:14px"><button class="btn" id="b-issue">リンクを発行</button></div>
+        <div style="margin-top:6px">
+          ${state.links.length===0 ? `<p class="hint">まだ発行していません。</p>` : state.links.map(linkItem).join('')}
+        </div>
+      </div>`;
+  }
+
+  function linkItem(l){
+    const url = Yosegaki.linkFor(l.customId, l.token);
+    return `
+      <div class="link-item">
+        <div class="top">
+          <div><span class="nm">${esc(l.displayName)}</span> <span class="cid">${esc(l.customId)}</span></div>
+          <span class="badge ${l.posted?'posted':'waiting'}">${l.posted?'投稿済み':'未投稿'}</span>
+        </div>
+        <div class="link-url" data-copy="${esc(url)}">${esc(url)}</div>
+        <div style="margin-top:6px;display:flex;gap:8px">
+          <button class="btn sec" style="padding:7px 12px;font-size:12.5px" data-copy="${esc(url)}">リンクをコピー</button>
+          <button class="btn danger" data-revoke="${esc(l.customId)}">取り消し</button>
+        </div>
+      </div>`;
+  }
+
+  function render(){
+    if(!A.hasKey() || !A.getApi()){ root.innerHTML = setupView(); bindSetup(); return; }
+    root.innerHTML = dashboardView();
+    if(state.loading){ const b=document.createElement('div'); }
+    bindDashboard();
+  }
+
+  function bindSetup(){
+    document.getElementById('b-connect').onclick = async ()=>{
+      const api = document.getElementById('f-api').value.trim();
+      const key = document.getElementById('f-key').value.trim();
+      if(!api){ toast('Worker の URL を入力してください'); return; }
+      if(!key){ toast('管理者キーを入力してください'); return; }
+      A.setApi(api); A.setKey(key);
+      await refresh();
+      if(A.hasKey() && state.config) toast('接続しました');
+    };
+  }
+
+  function pickImage(cb){
+    const inp = document.createElement('input'); inp.type='file'; inp.accept='image/*';
+    inp.onchange = ()=>{ const f=inp.files&&inp.files[0]; if(!f) return; downscale(f, cb); };
+    inp.click();
+  }
+  function downscale(file, cb){
+    const url = URL.createObjectURL(file); const img = new Image();
+    img.onload = ()=>{ const max=900; const sc=Math.min(1,max/Math.max(img.width,img.height));
+      const c=document.createElement('canvas'); c.width=Math.round(img.width*sc); c.height=Math.round(img.height*sc);
+      c.getContext('2d').drawImage(img,0,0,c.width,c.height); URL.revokeObjectURL(url);
+      cb(c.toDataURL('image/jpeg',0.85)); };
+    img.src = url;
+  }
+
+  function bindDashboard(){
+    document.getElementById('b-logout').onclick = (e)=>{ e.preventDefault(); A.setKey(''); render(); };
+
+    root.querySelectorAll('[data-seg]').forEach(b=>{
+      b.onclick = async ()=>{
+        const field=b.dataset.seg, val=b.dataset.val;
+        try { state.config = await A.putConfig({ [field]: val }); render(); }
+        catch(e){ toast(e.message||'保存に失敗しました'); }
+      };
+    });
+
+    document.getElementById('b-savecfg').onclick = async ()=>{
+      const patch = {
+        title: document.getElementById('c-title').value,
+        notice: document.getElementById('c-notice').value,
+        deadline: document.getElementById('c-deadline').value
+      };
+      try { state.config = await A.putConfig(patch); toast('設定を保存しました'); render(); }
+      catch(e){ toast(e.message||'保存に失敗しました'); }
+    };
+
+    const center = document.getElementById('b-center');
+    if(center) center.onclick = ()=> pickImage(async d=>{ try{ await A.uploadAsset('center', d); toast('中心地画像を保存しました'); await refresh(); }catch(e){ toast(e.message); } });
+    const centerClear = document.getElementById('b-center-clear');
+    if(centerClear) centerClear.onclick = async ()=>{ try{ await A.deleteAsset('center'); await refresh(); }catch(e){ toast(e.message); } };
+
+    const bg = document.getElementById('b-bg');
+    if(bg) bg.onclick = ()=> pickImage(async d=>{ try{ await A.uploadAsset('bg', d); await A.putConfig({bgPattern:'image'}); toast('背景画像を保存しました'); await refresh(); }catch(e){ toast(e.message); } });
+    const bgClear = document.getElementById('b-bg-clear');
+    if(bgClear) bgClear.onclick = async ()=>{ try{ await A.deleteAsset('bg'); await refresh(); }catch(e){ toast(e.message); } };
+
+    const nameEl = document.getElementById('n-name');
+    const cidEl = document.getElementById('n-cid');
+    nameEl.oninput = ()=>{ cidEl.placeholder = '初期値: ' + slug(nameEl.value); };
+    document.getElementById('b-issue').onclick = async ()=>{
+      const name = nameEl.value.trim();
+      let cid = cidEl.value.trim() || slug(name);
+      if(!name){ toast('表示名を入力してください'); return; }
+      if(!cid){ toast('カスタムidを入力してください'); return; }
+      try {
+        await A.issueLink(cid, name);
+        nameEl.value=''; cidEl.value='';
+        toast('リンクを発行しました');
+        await refresh();
+      } catch(e){ toast(e.message||'発行に失敗しました'); }
+    };
+
+    root.querySelectorAll('[data-copy]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        const url = el.dataset.copy;
+        if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(()=>toast('リンクをコピーしました')).catch(()=>toast('コピーできませんでした'));
+        else toast('コピーできませんでした');
+      });
+    });
+    root.querySelectorAll('[data-revoke]').forEach(b=>{
+      b.onclick = async ()=>{
+        if(!confirm('このリンクを取り消しますか？（投稿者は編集できなくなります）')) return;
+        try { await A.revokeLink(b.dataset.revoke); await refresh(); toast('取り消しました'); }
+        catch(e){ toast(e.message); }
+      };
+    });
+  }
+
+  function slug(s){
+    return String(s||'').replace(/^@/,'').replace(/[^A-Za-z0-9_-]/g,'').slice(0,40);
+  }
+
+  refresh();
+})();
+</script>
+</body>
+</html>

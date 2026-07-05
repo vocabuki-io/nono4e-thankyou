@@ -6,7 +6,7 @@
 <title>寄せ書き｜みんなのメッセージ</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
-<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&family=M+PLUS+Rounded+1c:wght@500;700;900&family=Kiwi+Maru:wght@400;500&family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
 <style>
 html,body{margin:0;padding:0;height:100%;overscroll-behavior:none;background:#e4e7ea}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -17,51 +17,24 @@ html,body{margin:0;padding:0;height:100%;overscroll-behavior:none;background:#e4
 </head>
 <body>
 <div id="app"></div>
+<script src="config.js"></script>
+<script src="store.js"></script>
 <script>
 (function () {
+  const FONTS = {
+    zen: "'Zen Maru Gothic', sans-serif",
+    mplus: "'M PLUS Rounded 1c', sans-serif",
+    kiwi: "'Kiwi Maru', serif",
+    noto: "'Noto Sans JP', sans-serif"
+  };
   const THEME = {
     envW: 110, envRatio: 0.72, envRadius: 3, envColor: '#f2dd8e', flapColor: '#e3c463',
     shadow: 0.18, tilt: 4, nameSize: 12, nameColor: '#6b5c26',
     pinSize: 18, pinColor: '#e23b2e', pinOffset: -8,
-    bgColor: '#e4e7ea', patDensity: 0.05, centerSize: 210
+    bgPattern: 'stripe', bgColor: '#e4e7ea', patDensity: 0.05,
+    font: 'zen', centerSize: 210, centerImg: false,
+    centerUrl: null, bgUrl: null, photoMode: 'photo'
   };
-
-  function rng(seed) {
-    let t = seed >>> 0;
-    return () => {
-      t += 0x6D2B79F5;
-      let r = Math.imul(t ^ (t >>> 15), 1 | t);
-      r = (r + Math.imul(r ^ (r >>> 7), 61 | r)) ^ r;
-      return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
-    };
-  }
-
-  function buildData() {
-    const names = ['ゆうた','さくら','けんじ','あおい','ミホ','たかし','リサ','ショウ','なな','ヒロ','まい','ダイキ','えみ','こうた'];
-    const comments = [
-      'ご卒業おめでとうございます！一緒に過ごした時間は宝物です。新しい場所でも、らしさ全開で頑張ってください。また集まりましょうね！',
-      'お疲れさまでした！いつも笑顔で助けてくれてありがとう。これからの新しい挑戦、心から応援しています。体にだけは気をつけて！',
-      'おめでとう！初めて会った日のことを今でも覚えています。あなたのおかげで毎日が楽しかったです。ずっと友達でいてください。',
-      '本当にありがとうございました。困ったときいつも一番に声をかけてくれたこと、忘れません。またご飯行きましょう！'
-    ];
-    const S = THEME;
-    const rnd = rng(7);
-    const C = 800, minR = S.centerSize / 2 + S.envW * 0.72 + 26, maxR = 640;
-    const data = [];
-    for (let i = 0; i < names.length; i++) {
-      const a = rnd() * Math.PI * 2;
-      const r = minR + Math.pow(rnd(), 0.72) * Math.max(40, maxR - minR);
-      data.push({
-        name: names[i],
-        comment: comments[i % comments.length],
-        hasPhoto: i % 3 !== 0,
-        x: Math.min(1450, Math.max(150, C + Math.cos(a) * r * 1.12)),
-        y: Math.min(1430, Math.max(170, C + Math.sin(a) * r * 0.95)),
-        deg: (rnd() * 2 - 1) * S.tilt
-      });
-    }
-    return data;
-  }
 
   function styleStr(obj) {
     return Object.keys(obj).map(k => {
@@ -74,10 +47,45 @@ html,body{margin:0;padding:0;height:100%;overscroll-behavior:none;background:#e4
     return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
+  function bgStyles(S) {
+    const a = S.patDensity;
+    if (S.bgPattern === 'image' && S.bgUrl) {
+      return { image: `url('${S.bgUrl}')`, size: 'cover', extra: 'background-position:center' };
+    }
+    let image = 'linear-gradient(rgba(255,255,255,.35), rgba(0,0,0,.03))';
+    let size = 'auto';
+    if (S.bgPattern === 'stripe') {
+      image = `repeating-linear-gradient(90deg, rgba(255,255,255,${a * 4}) 0px, rgba(255,255,255,${a * 4}) 42px, rgba(255,255,255,0) 42px, rgba(255,255,255,0) 84px), linear-gradient(rgba(255,255,255,.3), rgba(0,0,0,.03))`;
+    } else if (S.bgPattern === 'dot') {
+      image = `radial-gradient(rgba(0,0,0,${a * 3}) 1.5px, transparent 1.6px)`;
+      size = '26px 26px';
+    }
+    return { image, size };
+  }
+
+  function centerHtml(S) {
+    const base = {
+      position: 'absolute', left: '800px', top: '800px',
+      width: S.centerSize + 'px', height: S.centerSize + 'px',
+      transform: 'translate(-50%,-50%)', borderRadius: '14px',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '12px'
+    };
+    if (S.centerUrl) {
+      Object.assign(base, {
+        background: `center / cover no-repeat url('${S.centerUrl}'), #fff`,
+        border: '4px solid #fff', boxShadow: '0 3px 14px rgba(0,0,0,.22)', padding: 0
+      });
+      return `<div style="${styleStr(base)}"></div>`;
+    }
+    Object.assign(base, { background: 'rgba(255,255,255,.55)', border: '2px dashed rgba(0,0,0,.2)' });
+    return `<div style="${styleStr(base)}"><div style="font-weight:700;opacity:.5;text-align:center;line-height:1.5;font-size:14px">中心地デザイン<br>（準備中）</div></div>`;
+  }
+
   class Viewer {
     constructor(root) {
       this.root = root;
-      this.data = buildData();
+      this.data = [];
+      this.loading = true;
       this.state = { panX: 0, panY: 0, zoom: 1, open: null, query: '', focused: false };
       this._ptrs = new Map();
       this._pinch = null;
@@ -92,6 +100,21 @@ html,body{margin:0;padding:0;height:100%;overscroll-behavior:none;background:#e4
       root.addEventListener('click', e => this.onClick(e));
       root.addEventListener('input', e => this.onInput(e));
 
+      this.render();
+      this.init();
+    }
+
+    async init() {
+      try {
+        const feed = await Yosegaki.loadFeed();
+        if (feed.config) Object.assign(THEME, feed.config);
+        const posts = Array.isArray(feed.posts) ? feed.posts : [];
+        this.data = posts.slice().sort((a, b) => (a.updatedAt || 0) - (b.updatedAt || 0));
+      } catch (e) {
+        this.data = [];
+      }
+      this.loading = false;
+      this.root.style.background = THEME.bgColor;
       this.render();
     }
 
@@ -113,7 +136,7 @@ html,body{margin:0;padding:0;height:100%;overscroll-behavior:none;background:#e4
       const wrapStyle = {
         position: 'absolute', left: item.x + 'px', top: item.y + 'px',
         width: S.envW + 'px', height: envH + 'px',
-        transform: `translate(-50%,-50%) rotate(${item.deg}deg)`,
+        transform: `translate(-50%,-50%) rotate(${item.deg || 0}deg)`,
         zIndex: i + 1, cursor: 'pointer',
         transition: 'left .5s ease, top .5s ease'
       };
@@ -126,11 +149,12 @@ html,body{margin:0;padding:0;height:100%;overscroll-behavior:none;background:#e4
         position: 'absolute', top: 0, left: 0, right: 0, height: '46%',
         background: S.flapColor, clipPath: 'polygon(0 0, 100% 0, 50% 100%)'
       };
-      const nameStyle = {
-        position: 'absolute', bottom: '7%', left: 0, right: 0,
-        textAlign: 'center', fontSize: S.nameSize + 'px',
-        fontWeight: 700, color: S.nameColor, whiteSpace: 'nowrap', overflow: 'hidden'
-      };
+      const nameStyle = S.photoMode === 'text'
+        ? { position: 'absolute', top: '8%', right: '8%', textAlign: 'right', fontSize: S.nameSize + 'px',
+            fontWeight: 700, color: S.nameColor, whiteSpace: 'nowrap', overflow: 'hidden', maxWidth: '80%' }
+        : { position: 'absolute', bottom: '7%', left: 0, right: 0,
+            textAlign: 'center', fontSize: S.nameSize + 'px',
+            fontWeight: 700, color: S.nameColor, whiteSpace: 'nowrap', overflow: 'hidden' };
       const pinStyle = {
         position: 'absolute', top: S.pinOffset + 'px', left: '50%',
         transform: 'translateX(-50%)',
@@ -142,7 +166,7 @@ html,body{margin:0;padding:0;height:100%;overscroll-behavior:none;background:#e4
         <div style="${styleStr(wrapStyle)}" data-action="open-envelope" data-idx="${i}">
           <div style="${styleStr(bodyStyle)}">
             <div style="${styleStr(flapStyle)}"></div>
-            <div style="${styleStr(nameStyle)}">${esc(item.name)}</div>
+            <div style="${styleStr(nameStyle)}">${esc(item.name || '')}</div>
           </div>
           <div style="${styleStr(pinStyle)}"></div>
         </div>`;
@@ -152,30 +176,24 @@ html,body{margin:0;padding:0;height:100%;overscroll-behavior:none;background:#e4
       const S = THEME;
       const st = this.state;
       const q = st.query.trim();
-      const results = q ? this.data.map((d, idx) => ({ d, idx })).filter(({ d }) => d.name.includes(q)) : [];
+      const results = q ? this.data.map((d, idx) => ({ d, idx })).filter(({ d }) => (d.name || '').includes(q)) : [];
       const showResults = st.focused || q.length > 0;
       const noResults = q.length > 0 && results.length === 0;
+      const bg = bgStyles(S);
 
       const canvasStyle = {
         position: 'absolute', left: '50%', top: '50%',
         width: '1600px', height: '1600px',
         transform: this.canvasTransform(),
         backgroundColor: S.bgColor,
-        backgroundImage: `repeating-linear-gradient(90deg, rgba(255,255,255,${S.patDensity * 4}) 0px, rgba(255,255,255,${S.patDensity * 4}) 42px, rgba(255,255,255,0) 42px, rgba(255,255,255,0) 84px), linear-gradient(rgba(255,255,255,.3), rgba(0,0,0,.03))`
-      };
-      const centerStyle = {
-        position: 'absolute', left: '800px', top: '800px',
-        width: S.centerSize + 'px', height: S.centerSize + 'px',
-        transform: 'translate(-50%,-50%)',
-        background: 'rgba(255,255,255,.55)', border: '2px dashed rgba(0,0,0,.2)',
-        borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '12px'
+        backgroundImage: bg.image,
+        backgroundSize: bg.size,
+        backgroundPosition: bg.extra ? 'center' : 'initial'
       };
 
       return `
         <div id="canvas" style="${styleStr(canvasStyle)}">
-          <div style="${styleStr(centerStyle)}">
-            <div style="font-weight:700;opacity:.5;text-align:center;line-height:1.5;font-size:14px">中心地デザイン<br>（プレースホルダ）</div>
-          </div>
+          ${centerHtml(S)}
           ${this.data.map((item, i) => this.envelopeHtml(item, i)).join('')}
         </div>
 
@@ -190,11 +208,14 @@ html,body{margin:0;padding:0;height:100%;overscroll-behavior:none;background:#e4
             ${results.map(({ d, idx }) => `
               <div data-action="goto-result" data-idx="${idx}" style="padding:13px 16px;border-bottom:1px solid #f0f1f3;display:flex;align-items:center;gap:10px;cursor:pointer">
                 <span style="font-size:15px;color:#e23b2e">📍</span>
-                <span style="font-size:14.5px;font-weight:700;color:#3a3d42">${esc(d.name)}</span>
+                <span style="font-size:14.5px;font-weight:700;color:#3a3d42">${esc(d.name || '')}</span>
               </div>`).join('')}
             ${noResults ? `<div style="padding:16px;font-size:13.5px;color:#9aa1ab;text-align:center">見つかりませんでした</div>` : ''}
           </div>` : ''}
         </div>
+
+        ${this.loading ? `<div style="position:absolute;left:50%;bottom:calc(env(safe-area-inset-bottom) + 26px);transform:translateX(-50%);z-index:12;background:rgba(40,44,50,.88);color:#fff;font-size:13px;font-weight:700;border-radius:999px;padding:11px 18px;white-space:nowrap">読み込み中…</div>` : ''}
+        ${!this.loading && this.data.length === 0 ? `<div style="position:absolute;left:50%;bottom:calc(env(safe-area-inset-bottom) + 26px);transform:translateX(-50%);z-index:12;background:rgba(40,44,50,.88);color:#fff;font-size:13px;font-weight:700;border-radius:999px;padding:11px 18px;white-space:nowrap;max-width:88vw;overflow:hidden;text-overflow:ellipsis">まだ投稿がありません。最初のメッセージを寄せよう！</div>` : ''}
 
         <button data-nopan="1" data-action="recenter" style="position:absolute;right:14px;bottom:calc(env(safe-area-inset-bottom) + 20px);z-index:15;width:46px;height:46px;border-radius:50%;border:none;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.22);font-size:20px;color:#3b6ea5;display:flex;align-items:center;justify-content:center">◎</button>
 
@@ -204,16 +225,17 @@ html,body{margin:0;padding:0;height:100%;overscroll-behavior:none;background:#e4
             <div style="width:44px;height:5px;border-radius:3px;background:#e0e3e8"></div>
           </div>
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-            <div style="font-size:18px;font-weight:800;color:#333">${esc(st.open.name)} さんより</div>
+            <div style="font-size:18px;font-weight:800;color:#333">${esc(st.open.name || '')} さんより</div>
             <button data-action="close-sheet" style="width:34px;height:34px;border-radius:50%;border:none;background:#eef0f3;font-size:15px;color:#666">✕</button>
           </div>
-          ${st.open.hasPhoto ? `<div style="width:100%;height:170px;border-radius:12px;background:#e9ecef;display:flex;align-items:center;justify-content:center;color:#9aa1ab;font-size:13px;font-weight:700;margin-bottom:12px">写真（プレースホルダ）</div>` : ''}
-          <div style="font-size:15px;line-height:1.8;color:#3d4148">${esc(st.open.comment)}</div>
+          ${st.open.photo ? `<img src="${esc(st.open.photo)}?v=${st.open.updatedAt || 0}" alt="" style="width:100%;max-height:280px;object-fit:cover;border-radius:12px;background:#e9ecef;margin-bottom:12px" onerror="this.style.display='none'">` : ''}
+          <div style="font-size:15px;line-height:1.8;color:#3d4148">${esc(st.open.comment || '')}</div>
         </div>` : ''}
       `;
     }
 
     render() {
+      this.root.style.fontFamily = FONTS[THEME.font] || FONTS.zen;
       const active = document.activeElement;
       let restore = null;
       if (active && this.root.contains(active) && active.dataset && active.dataset.field) {
