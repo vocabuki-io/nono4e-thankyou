@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>寄せ書き｜メッセージを寄せる</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;padding:0;height:100%;overscroll-behavior:none;background:#e4e7ea}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+@keyframes sheetin{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
+@keyframes dashpulse{0%,100%{opacity:.35}50%{opacity:1}}
+@keyframes toastin{from{opacity:0;transform:translate(-50%,8px)}to{opacity:1;transform:translate(-50%,0)}}
+textarea{font-family:inherit}
+#app{position:fixed;inset:0;overflow:hidden;font-family:'Zen Maru Gothic',sans-serif;touch-action:none;user-select:none;-webkit-user-select:none}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+(function () {
+  const THEME = {
+    envW: 110, envRatio: 0.72, envRadius: 3, envColor: '#f2dd8e', flapColor: '#e3c463',
+    shadow: 0.18, tilt: 4, nameSize: 12, nameColor: '#6b5c26',
+    pinSize: 18, pinColor: '#e23b2e', pinOffset: -8,
+    bgColor: '#e4e7ea', patDensity: 0.05, centerSize: 210
+  };
+  const KEY = 'yosegaki-contributor-v1';
+
+  function rng(seed) {
+    let t = seed >>> 0;
+    return () => {
+      t += 0x6D2B79F5;
+      let r = Math.imul(t ^ (t >>> 15), 1 | t);
+      r = (r + Math.imul(r ^ (r >>> 7), 61 | r)) ^ r;
+      return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function buildOthers() {
+    const names = ['ゆうた','さくら','けんじ','あおい','ミホ','たかし'];
+    const comments = [
+      'ご卒業おめでとうございます！新しい場所でも頑張ってください。',
+      'お疲れさまでした！これからの挑戦を応援しています。',
+      'おめでとう！あなたのおかげで毎日が楽しかったです。',
+      '本当にありがとうございました。またご飯行きましょう！'
+    ];
+    const S = THEME;
+    const rnd = rng(11);
+    const C = 800, minR = S.centerSize / 2 + S.envW * 0.72 + 26, maxR = 640;
+    return names.map((name, i) => {
+      const a = rnd() * Math.PI * 2;
+      const r = minR + Math.pow(rnd(), 0.72) * Math.max(40, maxR - minR);
+      return {
+        name, comment: comments[i % comments.length],
+        x: Math.min(1450, Math.max(150, C + Math.cos(a) * r * 1.12)),
+        y: Math.min(1430, Math.max(170, C + Math.sin(a) * r * 0.95)),
+        deg: (rnd() * 2 - 1) * S.tilt
+      };
+    });
+  }
+
+  function styleStr(obj) {
+    return Object.keys(obj).map(k => {
+      const prop = k.replace(/[A-Z]/g, m => '-' + m.toLowerCase());
+      return `${prop}:${obj[k]}`;
+    }).join(';');
+  }
+
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function envStyle(x, y, deg, z, nameColorOverride) {
+    const S = THEME;
+    const envH = S.envW * S.envRatio;
+    return {
+      wrapStyle: {
+        position: 'absolute', left: x + 'px', top: y + 'px',
+        width: S.envW + 'px', height: envH + 'px',
+        transform: `translate(-50%,-50%) rotate(${deg}deg)`,
+        zIndex: z, cursor: 'pointer', transition: 'left .35s ease, top .35s ease'
+      },
+      bodyStyle: {
+        position: 'absolute', inset: 0, background: S.envColor,
+        borderRadius: S.envRadius + 'px', overflow: 'hidden',
+        boxShadow: `0 2px 8px rgba(0,0,0,${S.shadow})`
+      },
+      flapStyle: {
+        position: 'absolute', top: 0, left: 0, right: 0, height: '46%',
+        background: S.flapColor, clipPath: 'polygon(0 0, 100% 0, 50% 100%)'
+      },
+      nameStyle: {
+        position: 'absolute', bottom: '7%', left: 0, right: 0,
+        textAlign: 'center', fontSize: S.nameSize + 'px',
+        fontWeight: 700, color: nameColorOverride || S.nameColor, whiteSpace: 'nowrap', overflow: 'hidden'
+      },
+      pinStyle: {
+        position: 'absolute', top: S.pinOffset + 'px', left: '50%',
+        transform: 'translateX(-50%)',
+        width: S.pinSize + 'px', height: S.pinSize + 'px', borderRadius: '50%',
+        background: `radial-gradient(circle at 35% 30%, rgba(255,255,255,.9), rgba(255,255,255,0) 46%), ${S.pinColor}`,
+        boxShadow: '0 2px 3px rgba(0,0,0,.35)'
+      }
+    };
+  }
+
+  class Contribute {
+    constructor(root) {
+      this.root = root;
+      this.others = buildOthers();
+      this.state = {
+        panX: 0, panY: 0, zoom: 1,
+        mine: null, pending: null, moving: false,
+        sheet: null, draft: '', draftPhoto: null,
+        otherOpen: null, toast: ''
+      };
+      this._ptrs = new Map();
+      this._pinch = null;
+      this._d = null;
+
+      root.style.background = THEME.bgColor;
+      root.addEventListener('pointerdown', e => this.onDown(e));
+      root.addEventListener('pointermove', e => this.onMove(e));
+      root.addEventListener('pointerup', e => this.onUp(e));
+      root.addEventListener('pointerleave', e => this.onUp(e));
+      root.addEventListener('wheel', e => this.onWheel(e), { passive: true });
+      root.addEventListener('click', e => this.onClick(e));
+      root.addEventListener('input', e => this.onInput(e));
+      root.addEventListener('change', e => this.onChange(e));
+
+      try {
+        const s = JSON.parse(localStorage.getItem(KEY));
+        if (s) this.state.mine = s;
+      } catch (e) {}
+
+      this.render();
+    }
+
+    setState(patch) { Object.assign(this.state, patch); this.render(); }
+
+    persist(mine) {
+      try {
+        if (mine) localStorage.setItem(KEY, JSON.stringify(mine));
+        else localStorage.removeItem(KEY);
+      } catch (e) {}
+    }
+
+    flashToast(msg) {
+      this.state.toast = msg;
+      this.render();
+      clearTimeout(this._tt);
+      this._tt = setTimeout(() => this.setState({ toast: '' }), 1800);
+    }
+
+    canvasTransform() {
+      const s = this.state;
+      return `translate(calc(-50% + ${s.panX}px), calc(-50% + ${s.panY}px)) scale(${s.zoom})`;
+    }
+
+    updateTransform() {
+      const canvas = this.root.querySelector('#canvas');
+      if (canvas) canvas.style.transform = this.canvasTransform();
+    }
+
+    envelopeHtml(st2, name, action, idx) {
+      return `
+        <div style="${styleStr(st2.wrapStyle)}" data-action="${action}" data-idx="${idx}">
+          <div style="${styleStr(st2.bodyStyle)}">
+            <div style="${styleStr(st2.flapStyle)}"></div>
+            <div style="${styleStr(st2.nameStyle)}">${esc(name)}</div>
+          </div>
+          <div style="${styleStr(st2.pinStyle)}"></div>
+        </div>`;
+    }
+
+    template() {
+      const S = THEME;
+      const st = this.state;
+
+      const canvasStyle = {
+        position: 'absolute', left: '50%', top: '50%',
+        width: '1600px', height: '1600px',
+        transform: this.canvasTransform(),
+        backgroundColor: S.bgColor,
+        backgroundImage: `repeating-linear-gradient(90deg, rgba(255,255,255,${S.patDensity * 4}) 0px, rgba(255,255,255,${S.patDensity * 4}) 42px, rgba(255,255,255,0) 42px, rgba(255,255,255,0) 84px), linear-gradient(rgba(255,255,255,.3), rgba(0,0,0,.03))`
+      };
+      const centerStyle = {
+        position: 'absolute', left: '800px', top: '800px',
+        width: S.centerSize + 'px', height: S.centerSize + 'px',
+        transform: 'translate(-50%,-50%)',
+        background: 'rgba(255,255,255,.55)', border: '2px dashed rgba(0,0,0,.2)',
+        borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '12px'
+      };
+
+      let mineHtml = '';
+      if (st.mine) {
+        const mineOut = envStyle(st.mine.x, st.mine.y, 0, 900, '#2a5a30');
+        mineOut.pinStyle.background = `radial-gradient(circle at 35% 30%, rgba(255,255,255,.9), rgba(255,255,255,0) 46%), #2f8a3e`;
+        mineOut.bodyStyle.boxShadow = `0 2px 8px rgba(0,0,0,${S.shadow}), 0 0 0 2.5px #2f8a3e`;
+        mineHtml = this.envelopeHtml(mineOut, 'あなた', 'open-mine', '');
+      }
+
+      let pendingHtml = '';
+      if (st.pending) {
+        const pendingStyle = {
+          position: 'absolute', left: st.pending.x + 'px', top: st.pending.y + 'px',
+          width: S.envW + 'px', height: (S.envW * S.envRatio) + 'px',
+          transform: 'translate(-50%,-50%)', zIndex: 950
+        };
+        pendingHtml = `<div style="${styleStr(pendingStyle)}">
+          <div style="width:100%;height:100%;border-radius:8px;border:2.5px dashed #3b6ea5;animation:dashpulse 1.1s ease-in-out infinite"></div>
+        </div>`;
+      }
+
+      const showGuide = !st.mine && !st.moving && !st.sheet;
+      const showMoveBar = !!st.mine && !st.moving && !st.sheet;
+      const draftLen = st.draft.length;
+      const counterColor = draftLen >= 200 ? '#c0392b' : '#9aa1ab';
+      const submitDisabled = draftLen === 0;
+      const submitLabel = st.sheet === 'edit' ? '更新する' : 'この場所に投稿する';
+      const submitStyle = {
+        width: '100%', border: 'none', borderRadius: '12px', padding: '15px',
+        fontSize: '15px', fontWeight: 800, fontFamily: 'inherit',
+        background: submitDisabled ? '#dfe2e6' : '#3b6ea5',
+        color: submitDisabled ? '#a9adb3' : '#fff'
+      };
+
+      return `
+        <div id="canvas" style="${styleStr(canvasStyle)}">
+          <div style="${styleStr(centerStyle)}">
+            <div style="font-weight:700;opacity:.5;text-align:center;line-height:1.5;font-size:14px">中心地デザイン<br>（プレースホルダ）</div>
+          </div>
+          ${this.others.map((item, i) => this.envelopeHtml(envStyle(item.x, item.y, item.deg, i + 1), item.name, 'open-other', i)).join('')}
+          ${mineHtml}
+          ${pendingHtml}
+        </div>
+
+        <div style="position:absolute;top:calc(env(safe-area-inset-top) + 10px);left:12px;right:12px;z-index:12;background:rgba(255,255,255,.95);border-radius:14px;padding:10px 14px;box-shadow:0 2px 10px rgba(0,0,0,.15)">
+          <div style="font-size:12px;font-weight:700;color:#3b6ea5;margin-bottom:2px">寄せ書き受付中・2026/8/31まで</div>
+          <div style="font-size:11.5px;color:#777;line-height:1.5">やさしい言葉で、思い出に残るメッセージを届けよう。</div>
+        </div>
+
+        <button data-nopan="1" data-action="recenter" style="position:absolute;right:14px;top:calc(env(safe-area-inset-top) + 84px);z-index:14;width:44px;height:44px;border-radius:50%;border:none;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.22);font-size:19px;color:#3b6ea5;display:flex;align-items:center;justify-content:center">◎</button>
+
+        ${showGuide ? `<div style="position:absolute;left:50%;bottom:calc(env(safe-area-inset-bottom) + 26px);transform:translateX(-50%);z-index:12;background:rgba(40,44,50,.88);color:#fff;font-size:13px;font-weight:700;border-radius:999px;padding:11px 18px;white-space:nowrap">マップをタップしてピンを置こう</div>` : ''}
+
+        ${showMoveBar ? `
+        <div data-nopan="1" style="position:absolute;left:50%;bottom:calc(env(safe-area-inset-bottom) + 20px);transform:translateX(-50%);z-index:12;display:flex;gap:8px">
+          <button data-action="start-move" style="border:none;background:#fff;color:#3b6ea5;font-weight:700;font-size:13px;border-radius:999px;padding:11px 16px;box-shadow:0 2px 10px rgba(0,0,0,.2)">📍 場所を変更</button>
+          <button data-action="open-mine" style="border:none;background:#3b6ea5;color:#fff;font-weight:700;font-size:13px;border-radius:999px;padding:11px 16px;box-shadow:0 2px 10px rgba(0,0,0,.2)">✎ 内容を編集</button>
+        </div>` : ''}
+
+        ${st.moving ? `
+        <div data-nopan="1" style="position:absolute;left:50%;bottom:calc(env(safe-area-inset-bottom) + 20px);transform:translateX(-50%);z-index:12;display:flex;gap:8px;align-items:center">
+          <span style="background:rgba(40,44,50,.88);color:#fff;font-size:12.5px;font-weight:700;border-radius:999px;padding:10px 16px">新しい場所をタップ</span>
+          <button data-action="cancel-move" style="border:none;background:#fff;color:#888;font-weight:700;font-size:12.5px;border-radius:999px;padding:10px 14px;box-shadow:0 2px 10px rgba(0,0,0,.2)">やめる</button>
+        </div>` : ''}
+
+        ${st.sheet ? `
+        <div data-nopan="1" style="position:absolute;left:0;right:0;bottom:0;z-index:30;background:#fff;border-radius:20px 20px 0 0;box-shadow:0 -6px 30px rgba(0,0,0,.25);padding:10px 20px calc(env(safe-area-inset-bottom) + 20px);animation:sheetin .22s ease-out;max-height:78dvh;overflow-y:auto;touch-action:pan-y">
+          <div style="display:flex;justify-content:center;padding:2px 0 10px">
+            <div style="width:44px;height:5px;border-radius:3px;background:#e0e3e8"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+            <div style="font-size:17px;font-weight:800;color:#333">${st.sheet === 'edit' ? 'メッセージを編集' : 'メッセージを書く'}</div>
+            <button data-action="close-sheet" style="width:34px;height:34px;border-radius:50%;border:none;background:#eef0f3;font-size:15px;color:#666">✕</button>
+          </div>
+
+          <label style="display:block;width:100%;height:130px;border-radius:12px;background:${st.draftPhoto ? 'transparent' : '#eef0f3'};display:flex;align-items:center;justify-content:center;color:#9aa1ab;font-size:13px;font-weight:700;margin-bottom:14px;cursor:pointer;overflow:hidden;border:1.5px dashed #c9cfd6">
+            ${st.draftPhoto ? `<img src="${st.draftPhoto}" style="width:100%;height:100%;object-fit:cover">` : `<span>＋ 写真を追加（任意）</span>`}
+            <input type="file" accept="image/*" data-action="photo-input" style="display:none">
+          </label>
+
+          <textarea data-nopan="1" data-field="draft" data-action="draft-input" maxlength="200" placeholder="メッセージを書こう（200字まで）" style="width:100%;height:110px;border:1.5px solid #e3e6ea;border-radius:12px;padding:12px;font-size:15px;line-height:1.7;color:#333;resize:none;outline:none">${esc(st.draft)}</textarea>
+          <div style="text-align:right;font-size:12px;color:${counterColor};margin:4px 2px 16px">${draftLen} / 200</div>
+
+          <button data-action="submit" ${submitDisabled ? 'disabled' : ''} style="${styleStr(submitStyle)}">${submitLabel}</button>
+
+          ${st.sheet === 'edit' ? `<button data-action="delete" style="width:100%;border:none;background:transparent;color:#c0392b;font-weight:700;font-size:13px;padding:12px;margin-top:6px">この投稿を削除する</button>` : ''}
+        </div>` : ''}
+
+        ${st.otherOpen ? `
+        <div data-nopan="1" style="position:absolute;left:0;right:0;bottom:0;z-index:30;background:#fff;border-radius:20px 20px 0 0;box-shadow:0 -6px 30px rgba(0,0,0,.25);padding:10px 20px calc(env(safe-area-inset-bottom) + 22px);animation:sheetin .22s ease-out">
+          <div style="display:flex;justify-content:center;padding:2px 0 10px">
+            <div style="width:44px;height:5px;border-radius:3px;background:#e0e3e8"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <div style="font-size:18px;font-weight:800;color:#333">${esc(st.otherOpen.name)} さんより</div>
+            <button data-action="close-other" style="width:34px;height:34px;border-radius:50%;border:none;background:#eef0f3;font-size:15px;color:#666">✕</button>
+          </div>
+          <div style="width:100%;height:150px;border-radius:12px;background:#e9ecef;display:flex;align-items:center;justify-content:center;color:#9aa1ab;font-size:13px;font-weight:700;margin-bottom:12px">写真（プレースホルダ）</div>
+          <div style="font-size:15px;line-height:1.8;color:#3d4148">${esc(st.otherOpen.comment)}</div>
+        </div>` : ''}
+
+        ${st.toast ? `<div style="position:absolute;left:50%;bottom:45dvh;transform:translateX(-50%);z-index:40;background:rgba(40,44,50,.92);color:#fff;font-size:13px;font-weight:700;border-radius:999px;padding:10px 18px;animation:toastin .2s ease-out">${esc(st.toast)}</div>` : ''}
+      `;
+    }
+
+    render() {
+      const active = document.activeElement;
+      let restore = null;
+      if (active && this.root.contains(active) && active.dataset && active.dataset.field) {
+        restore = { field: active.dataset.field, start: active.selectionStart, end: active.selectionEnd };
+      }
+      this.root.innerHTML = this.template();
+      if (restore) {
+        const el = this.root.querySelector(`[data-field="${restore.field}"]`);
+        if (el) {
+          el.focus();
+          if (typeof restore.start === 'number' && el.setSelectionRange) {
+            try { el.setSelectionRange(restore.start, restore.end); } catch (e) {}
+          }
+        }
+      }
+    }
+
+    handlePhoto(file) {
+      if (!file) return;
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        const max = 800;
+        const sc = Math.min(1, max / Math.max(img.width, img.height));
+        const c = document.createElement('canvas');
+        c.width = Math.round(img.width * sc);
+        c.height = Math.round(img.height * sc);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        const data = c.toDataURL('image/jpeg', 0.82);
+        URL.revokeObjectURL(url);
+        this.setState({ draftPhoto: data });
+      };
+      img.src = url;
+    }
+
+    submit() {
+      const st = this.state;
+      const pos = st.mine && st.sheet === 'edit' ? { x: st.mine.x, y: st.mine.y } : (st.pending || { x: 800, y: 700 });
+      const mine = { x: pos.x, y: pos.y, comment: st.draft, photo: st.draftPhoto };
+      const wasEdit = st.sheet === 'edit';
+      this.setState({ mine, sheet: null, pending: null });
+      this.persist(mine);
+      this.flashToast(wasEdit ? '更新しました' : '投稿しました！');
+    }
+
+    onClick(e) {
+      const t = e.target.closest('[data-action]');
+      if (!t) return;
+      const action = t.dataset.action;
+      const st = this.state;
+      if (action === 'open-other') {
+        if (this._d && this._d.moved) return;
+        this.setState({ otherOpen: this.others[+t.dataset.idx] });
+      } else if (action === 'open-mine') {
+        if (this._d && this._d.moved) return;
+        this.setState({ sheet: 'edit', draft: st.mine.comment, draftPhoto: st.mine.photo || null });
+      } else if (action === 'close-other') {
+        this.setState({ otherOpen: null });
+      } else if (action === 'recenter') {
+        this.setState({ panX: 0, panY: 0, zoom: 1 });
+      } else if (action === 'start-move') {
+        this.setState({ moving: true });
+      } else if (action === 'cancel-move') {
+        this.setState({ moving: false, pending: null });
+      } else if (action === 'close-sheet') {
+        this.setState({ sheet: null, pending: st.mine ? null : st.pending });
+      } else if (action === 'submit') {
+        this.submit();
+      } else if (action === 'delete') {
+        this.setState({ mine: null, sheet: null, pending: null, moving: false });
+        this.persist(null);
+        this.flashToast('投稿を削除しました');
+      }
+    }
+
+    onChange(e) {
+      if (e.target.dataset.action === 'photo-input') {
+        const file = e.target.files && e.target.files[0];
+        e.target.value = '';
+        this.handlePhoto(file);
+      }
+    }
+
+    onInput(e) {
+      if (e.target.dataset.action === 'draft-input') {
+        this.setState({ draft: e.target.value.slice(0, 200) });
+      }
+    }
+
+    onDown(e) {
+      if (e.target.closest && e.target.closest('[data-nopan]')) return;
+      this._ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (this._ptrs.size === 2) {
+        const p = [...this._ptrs.values()];
+        this._pinch = { d: Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y), z: this.state.zoom };
+        this._d = null;
+      } else {
+        this._d = { sx: e.clientX, sy: e.clientY, px: this.state.panX, py: this.state.panY, on: true, moved: false, rect: e.currentTarget.getBoundingClientRect() };
+      }
+    }
+
+    onMove(e) {
+      if (this._ptrs.has(e.pointerId)) this._ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (this._pinch && this._ptrs.size >= 2) {
+        const p = [...this._ptrs.values()];
+        const dd = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+        this.state.zoom = Math.max(0.5, Math.min(2.5, +(this._pinch.z * dd / this._pinch.d).toFixed(3)));
+        this.updateTransform();
+        return;
+      }
+      const d = this._d;
+      if (!d || !d.on) return;
+      const dx = e.clientX - d.sx, dy = e.clientY - d.sy;
+      if (Math.abs(dx) + Math.abs(dy) > 6) d.moved = true;
+      this.state.panX = d.px + dx;
+      this.state.panY = d.py + dy;
+      this.updateTransform();
+    }
+
+    onUp(e) {
+      if (e && e.pointerId != null) this._ptrs.delete(e.pointerId);
+      const wasPinch = !!this._pinch;
+      if (this._ptrs.size < 2) this._pinch = null;
+      const d = this._d;
+      if (!d) return;
+      d.on = false;
+      if (wasPinch) return;
+      const st = this.state;
+      if (!d.moved && !st.sheet) {
+        if (!st.mine || st.moving) {
+          const rect = d.rect;
+          const cx = (e.clientX - rect.left - rect.width / 2 - st.panX) / st.zoom;
+          const cy = (e.clientY - rect.top - rect.height / 2 - st.panY) / st.zoom;
+          const x = 800 + cx, y = 800 + cy;
+          const wasMoving = st.moving;
+          if (wasMoving) {
+            const mine = { ...st.mine, x, y };
+            this.setState({ mine, pending: null, moving: false });
+            this.persist(mine);
+            this.flashToast('場所を変更しました');
+          } else {
+            this.setState({ pending: { x, y }, moving: false, sheet: 'new', draft: '', draftPhoto: null });
+          }
+        }
+      }
+    }
+
+    onWheel(e) {
+      this.state.zoom = Math.max(0.5, Math.min(2.5, +(this.state.zoom * (e.deltaY < 0 ? 1.08 : 0.93)).toFixed(3)));
+      this.updateTransform();
+    }
+  }
+
+  new Contribute(document.getElementById('app'));
+})();
+</script>
+</body>
+</html>
