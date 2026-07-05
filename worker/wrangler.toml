@@ -6,7 +6,7 @@ compatibility_date = "2024-11-01"
 # 出力された id を下に貼り付けてください。
 [[kv_namespaces]]
 binding = "YOSEGAKI_KV"
-id = "REPLACE_WITH_YOUR_KV_ID"
+id = "9701fbd69955477bbe3963141e175e8c"
 
 # 管理者キーは平文で書かず、シークレットとして登録してください:
 #   npx wrangler secret put ADMIN_KEY
