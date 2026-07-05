@@ -5,6 +5,6 @@
  *  - 完成フェーズ（焼き固め後）: api: "" にすると静的な docs/data/*.json を読みます
  */
 window.YOSEGAKI = {
-  api: "",
+  api: "https://yosegaki.dragxonx3.workers.dev",
   basePath: ""
 };
