@@ -1,168 +1,126 @@
 /*
- * 寄せ書き 共有データレイヤ
- * - 読み取り: GitHub Pages 上の docs/data/*(同一オリジン)を fetch するだけ
- * - 書き込み: GitHub Contents API を投稿キー(Fine-grained PAT)で直接呼ぶ
- *   投稿キーは招待リンクの「#k=トークン」から localStorage に保存され、
- *   リポジトリにはコミットされない
+ * 寄せ書き クライアント側データレイヤ
+ *
+ * 2フェーズ構成:
+ *  - 収集フェーズ（動的）: window.YOSEGAKI.api に Cloudflare Worker の URL がある場合。
+ *    閲覧は /api/feed、投稿は個別リンクのトークンで /api/post。
+ *  - 完成フェーズ（静的）: api が未設定の場合。焼き固めた docs/data/*.json を読むだけ。
+ *
+ * api の URL は docs/config.js（デプロイ時に設定）または localStorage 'yg-api'
+ * （管理者が admin.html から一時設定）で与える。
  */
 (function () {
-  const CFG = {
-    owner: 'vocabuki-io',
-    repo: 'nono4e-thankyou',
-    branch: 'main',
-    root: 'docs'
-  };
-  const TOKEN_KEY = 'yosegaki-token-v1';
+  const CFG = (window.YOSEGAKI || {});
+  function apiBase() {
+    let ov = '';
+    try { ov = localStorage.getItem('yg-api') || ''; } catch (e) {}
+    return (ov || CFG.api || '').replace(/\/$/, '');
+  }
+  const isApi = () => !!apiBase();
 
-  (function pickTokenFromUrl() {
-    const m = location.hash.match(/[#&]k=([^&]+)/);
-    if (!m) return;
-    try { localStorage.setItem(TOKEN_KEY, decodeURIComponent(m[1])); } catch (e) {}
-    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+  // ---- 個別リンクの取り込み: contribute.html?c=<id>#t=<token> ----
+  (function captureIdentity() {
+    const params = new URLSearchParams(location.search);
+    const c = params.get('c');
+    const hm = location.hash.match(/[#&]t=([^&]+)/);
+    const t = hm ? decodeURIComponent(hm[1]) : '';
+    if (c && t) {
+      try {
+        localStorage.setItem('yg-cid', c);
+        localStorage.setItem('yg-token:' + c, t);
+      } catch (e) {}
+      // トークンを URL から消す（履歴/リファラに残さない）
+      try { history.replaceState(null, '', location.pathname); } catch (e) {}
+    }
   })();
 
-  function getToken() {
-    try { return localStorage.getItem(TOKEN_KEY) || ''; } catch (e) { return ''; }
-  }
-  function setToken(t) {
-    try {
-      if (t) localStorage.setItem(TOKEN_KEY, t);
-      else localStorage.removeItem(TOKEN_KEY);
-    } catch (e) {}
-  }
-
-  function utf8ToB64(s) { return btoa(unescape(encodeURIComponent(s))); }
-  function b64ToUtf8(s) { return decodeURIComponent(escape(atob(s.replace(/\s/g, '')))); }
-
-  function headers() {
-    const h = { Accept: 'application/vnd.github+json' };
-    const t = getToken();
-    if (t) h.Authorization = 'Bearer ' + t;
-    return h;
-  }
-  function contentsUrl(path) {
-    return 'https://api.github.com/repos/' + CFG.owner + '/' + CFG.repo + '/contents/' + path;
-  }
-  function fail(status, message) {
-    const e = new Error(message);
-    e.status = status;
-    return e;
-  }
-  function authError() { return fail(401, '投稿キーが正しくないか、権限がありません'); }
-
-  async function getFile(path) {
-    const res = await fetch(contentsUrl(path) + '?ref=' + CFG.branch + '&t=' + Date.now(), { headers: headers() });
-    if (res.status === 404) return null;
-    if (res.status === 401 || res.status === 403) throw authError();
-    if (!res.ok) throw fail(res.status, '読み込みに失敗しました (' + res.status + ')');
-    return res.json();
-  }
-
-  async function putFile(path, contentB64, message) {
-    for (let i = 0; i < 4; i++) {
-      const cur = await getFile(path);
-      const body = { message: message, branch: CFG.branch, content: contentB64 };
-      if (cur && cur.sha) body.sha = cur.sha;
-      const res = await fetch(contentsUrl(path), { method: 'PUT', headers: headers(), body: JSON.stringify(body) });
-      if (res.ok) return;
-      if (res.status === 401 || res.status === 403) throw authError();
-      if (res.status !== 409 && res.status !== 422) throw fail(res.status, '保存に失敗しました (' + res.status + ')');
-      await new Promise(r => setTimeout(r, 350 * (i + 1)));
+  function identity() {
+    let c = '';
+    try { c = localStorage.getItem('yg-cid') || ''; } catch (e) {}
+    if (!c) {
+      const p = new URLSearchParams(location.search).get('c');
+      if (p) c = p;
     }
-    throw fail(409, '混み合っています。少し待ってからもう一度お試しください');
+    if (!c) return null;
+    let token = '';
+    try { token = localStorage.getItem('yg-token:' + c) || ''; } catch (e) {}
+    return { customId: c, token };
   }
 
-  // 同時投稿で上書きし合わないよう、毎回最新を取得し直して sha 競合時はリトライする
-  async function updateJsonFile(path, mutate, message) {
-    for (let i = 0; i < 4; i++) {
-      const cur = await getFile(path);
-      let data = [];
-      if (cur && cur.content) {
-        try { data = JSON.parse(b64ToUtf8(cur.content)); } catch (e) { data = []; }
-      }
-      if (!Array.isArray(data)) data = [];
-      const next = mutate(data);
-      const body = { message: message, branch: CFG.branch, content: utf8ToB64(JSON.stringify(next, null, 1)) };
-      if (cur && cur.sha) body.sha = cur.sha;
-      const res = await fetch(contentsUrl(path), { method: 'PUT', headers: headers(), body: JSON.stringify(body) });
-      if (res.ok) return;
-      if (res.status === 401 || res.status === 403) throw authError();
-      if (res.status !== 409 && res.status !== 422) throw fail(res.status, '保存に失敗しました (' + res.status + ')');
-      await new Promise(r => setTimeout(r, 350 * (i + 1)));
-    }
-    throw fail(409, '混み合っています。少し待ってからもう一度お試しください');
-  }
+  function fail(status, message) { const e = new Error(message); e.status = status; return e; }
 
-  async function deleteFile(path, message) {
-    const cur = await getFile(path);
-    if (!cur) return;
-    const res = await fetch(contentsUrl(path), {
-      method: 'DELETE', headers: headers(),
-      body: JSON.stringify({ message: message, branch: CFG.branch, sha: cur.sha })
-    });
-    if (res.ok || res.status === 404) return;
-    if (res.status === 401 || res.status === 403) throw authError();
-    throw fail(res.status, '削除に失敗しました (' + res.status + ')');
-  }
-
-  async function loadPosts() {
-    try {
-      const res = await fetch('data/posts.json?t=' + Date.now(), { cache: 'no-store' });
-      if (!res.ok) return [];
-      const j = await res.json();
-      return Array.isArray(j) ? j : [];
-    } catch (e) { return []; }
-  }
-
-  async function loadTheme() {
-    try {
-      const res = await fetch('data/theme.json?t=' + Date.now(), { cache: 'no-store' });
-      if (!res.ok) return null;
-      return await res.json();
-    } catch (e) { return null; }
-  }
-
-  async function savePost(post, opt) {
+  async function apiFetch(pathname, opt) {
     opt = opt || {};
-    if (opt.photoDataUrl) {
-      await putFile(CFG.root + '/data/photos/' + post.id + '.jpg', opt.photoDataUrl.split(',')[1], '写真を更新: ' + post.name);
-      post.photo = 'data/photos/' + post.id + '.jpg';
-    } else if (opt.removePhoto) {
-      await deleteFile(CFG.root + '/data/photos/' + post.id + '.jpg', '写真を削除: ' + post.name);
-      post.photo = null;
+    const res = await fetch(apiBase() + pathname, opt);
+    const ct = res.headers.get('Content-Type') || '';
+    const data = ct.includes('json') ? await res.json().catch(() => ({})) : null;
+    if (!res.ok) throw fail(res.status, (data && data.error) || ('通信に失敗しました (' + res.status + ')'));
+    return data;
+  }
+
+  // ---- 閲覧（両モード共通） ----
+  async function loadFeed() {
+    if (isApi()) {
+      return apiFetch('/api/feed?t=' + Date.now());
     }
-    await updateJsonFile(
-      CFG.root + '/data/posts.json',
-      arr => arr.filter(p => p && p.id !== post.id).concat([post]),
-      '寄せ書き: ' + post.name
-    );
+    // 静的（完成フェーズ）
+    const [config, posts] = await Promise.all([
+      fetch('data/config.json?t=' + Date.now(), { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch('data/posts.json?t=' + Date.now(), { cache: 'no-store' }).then(r => r.ok ? r.json() : []).catch(() => [])
+    ]);
+    return { config: config || {}, posts: Array.isArray(posts) ? posts : [] };
   }
 
-  async function deletePost(id, name) {
-    await updateJsonFile(
-      CFG.root + '/data/posts.json',
-      arr => arr.filter(p => p && p.id !== id),
-      '投稿を削除: ' + (name || id)
-    );
-    await deleteFile(CFG.root + '/data/photos/' + id + '.jpg', '写真を削除: ' + (name || id));
+  // ---- 投稿者（収集フェーズのみ） ----
+  async function whoami() {
+    const id = identity();
+    if (!id || !id.token) throw fail(401, 'リンクが無効です。招待リンクから開いてください');
+    return apiFetch('/api/whoami?c=' + encodeURIComponent(id.customId) + '&t=' + encodeURIComponent(id.token) + '&r=' + Date.now());
   }
 
-  async function saveTheme(theme) {
-    await putFile(CFG.root + '/data/theme.json', utf8ToB64(JSON.stringify(theme, null, 1)), 'デザイン設定を更新');
+  async function savePost(data) {
+    const id = identity();
+    if (!id || !id.token) throw fail(401, 'リンクが無効です');
+    const payload = Object.assign({ customId: id.customId, token: id.token }, data);
+    return apiFetch('/api/post', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+    });
   }
 
-  async function saveCenterImage(dataUrl) {
-    await putFile(CFG.root + '/data/center.jpg', dataUrl.split(',')[1], '中心地画像を更新');
+  async function deletePost() {
+    const id = identity();
+    if (!id || !id.token) throw fail(401, 'リンクが無効です');
+    return apiFetch('/api/post', {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customId: id.customId, token: id.token })
+    });
   }
 
-  async function removeCenterImage() {
-    await deleteFile(CFG.root + '/data/center.jpg', '中心地画像を削除');
+  // ---- 管理者 ----
+  const admin = {
+    setApi(url) { try { url ? localStorage.setItem('yg-api', url.replace(/\/$/, '')) : localStorage.removeItem('yg-api'); } catch (e) {} },
+    getApi: apiBase,
+    setKey(k) { try { k ? localStorage.setItem('yg-admin', k) : localStorage.removeItem('yg-admin'); } catch (e) {} },
+    getKey() { try { return localStorage.getItem('yg-admin') || ''; } catch (e) { return ''; } },
+    hasKey() { return !!admin.getKey(); },
+    _headers() { return { 'Content-Type': 'application/json', Authorization: 'Bearer ' + admin.getKey() }; },
+    getConfig() { return apiFetch('/api/config?t=' + Date.now()); },
+    putConfig(patch) { return apiFetch('/api/config', { method: 'PUT', headers: admin._headers(), body: JSON.stringify(patch) }); },
+    uploadAsset(name, dataUrl) { return apiFetch('/api/asset/' + name, { method: 'PUT', headers: admin._headers(), body: JSON.stringify({ dataUrl }) }); },
+    deleteAsset(name) { return apiFetch('/api/asset/' + name, { method: 'DELETE', headers: admin._headers() }); },
+    issueLink(customId, displayName) { return apiFetch('/api/links', { method: 'POST', headers: admin._headers(), body: JSON.stringify({ customId, displayName }) }); },
+    listLinks() { return apiFetch('/api/links?t=' + Date.now(), { headers: admin._headers() }); },
+    revokeLink(customId) { return apiFetch('/api/link/' + encodeURIComponent(customId), { method: 'DELETE', headers: admin._headers() }); }
+  };
+
+  function linkFor(customId, token) {
+    const base = location.origin + location.pathname.replace(/[^/]*$/, '') + 'contribute.html';
+    return base + '?c=' + encodeURIComponent(customId) + '#t=' + encodeURIComponent(token);
   }
 
   window.Yosegaki = {
-    getToken, setToken,
-    loadPosts, loadTheme,
-    savePost, deletePost,
-    saveTheme, saveCenterImage, removeCenterImage
+    isApi, apiBase,
+    identity, whoami, loadFeed, savePost, deletePost,
+    admin, linkFor
   };
 })();

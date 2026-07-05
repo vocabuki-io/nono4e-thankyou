@@ -1,0 +1,12 @@
+name = "yosegaki"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+# KV 名前空間。`npx wrangler kv namespace create YOSEGAKI_KV` で作成し、
+# 出力された id を下に貼り付けてください。
+[[kv_namespaces]]
+binding = "YOSEGAKI_KV"
+id = "REPLACE_WITH_YOUR_KV_ID"
+
+# 管理者キーは平文で書かず、シークレットとして登録してください:
+#   npx wrangler secret put ADMIN_KEY

@@ -19,6 +19,7 @@ textarea,input{font-family:inherit}
 </head>
 <body>
 <div id="app"></div>
+<script src="config.js"></script>
 <script src="store.js"></script>
 <script>
 (function () {
@@ -33,10 +34,9 @@ textarea,input{font-family:inherit}
     shadow: 0.18, tilt: 4, nameSize: 12, nameColor: '#6b5c26',
     pinSize: 18, pinColor: '#e23b2e', pinOffset: -8,
     bgPattern: 'stripe', bgColor: '#e4e7ea', patDensity: 0.05,
-    font: 'zen', centerSize: 210, centerImg: false
+    font: 'zen', centerSize: 210, centerImg: false,
+    centerUrl: null, bgUrl: null, photoMode: 'photo', notice: '', deadline: ''
   };
-  const KEY = 'yosegaki-contributor-v2';
-  const ID_KEY = 'yosegaki-myid-v1';
 
   function styleStr(obj) {
     return Object.keys(obj).map(k => {
@@ -44,13 +44,13 @@ textarea,input{font-family:inherit}
       return `${prop}:${obj[k]}`;
     }).join(';');
   }
-
   function esc(s) {
-    return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
   function bgStyles(S) {
     const a = S.patDensity;
+    if (S.bgPattern === 'image' && S.bgUrl) return { image: `url('${S.bgUrl}')`, size: 'cover', img: true };
     let image = 'linear-gradient(rgba(255,255,255,.35), rgba(0,0,0,.03))';
     let size = 'auto';
     if (S.bgPattern === 'stripe') {
@@ -69,9 +69,9 @@ textarea,input{font-family:inherit}
       transform: 'translate(-50%,-50%)', borderRadius: '14px',
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '12px'
     };
-    if (S.centerImg) {
+    if (S.centerUrl) {
       Object.assign(base, {
-        background: "center / cover no-repeat url('data/center.jpg'), #fff",
+        background: `center / cover no-repeat url('${S.centerUrl}'), #fff`,
         border: '4px solid #fff', boxShadow: '0 3px 14px rgba(0,0,0,.22)', padding: 0
       });
       return `<div style="${styleStr(base)}"></div>`;
@@ -83,6 +83,11 @@ textarea,input{font-family:inherit}
   function envStyle(x, y, deg, z, nameColorOverride) {
     const S = THEME;
     const envH = S.envW * S.envRatio;
+    const nameStyle = S.photoMode === 'text'
+      ? { position: 'absolute', top: '8%', right: '8%', textAlign: 'right', fontSize: S.nameSize + 'px',
+          fontWeight: 700, color: nameColorOverride || S.nameColor, whiteSpace: 'nowrap', overflow: 'hidden', maxWidth: '80%' }
+      : { position: 'absolute', bottom: '7%', left: 0, right: 0, textAlign: 'center', fontSize: S.nameSize + 'px',
+          fontWeight: 700, color: nameColorOverride || S.nameColor, whiteSpace: 'nowrap', overflow: 'hidden' };
     return {
       wrapStyle: {
         position: 'absolute', left: x + 'px', top: y + 'px',
@@ -99,11 +104,7 @@ textarea,input{font-family:inherit}
         position: 'absolute', top: 0, left: 0, right: 0, height: '46%',
         background: S.flapColor, clipPath: 'polygon(0 0, 100% 0, 50% 100%)'
       },
-      nameStyle: {
-        position: 'absolute', bottom: '7%', left: 0, right: 0,
-        textAlign: 'center', fontSize: S.nameSize + 'px',
-        fontWeight: 700, color: nameColorOverride || S.nameColor, whiteSpace: 'nowrap', overflow: 'hidden'
-      },
+      nameStyle,
       pinStyle: {
         position: 'absolute', top: S.pinOffset + 'px', left: '50%',
         transform: 'translateX(-50%)',
@@ -119,12 +120,13 @@ textarea,input{font-family:inherit}
       this.root = root;
       this.others = [];
       this.loading = true;
+      this.error = '';
+      this.displayName = '';
       this.state = {
         panX: 0, panY: 0, zoom: 1,
         mine: null, pending: null, moving: false,
-        sheet: null, draft: '', draftName: '', draftPhoto: null, draftToken: '',
-        submitting: false,
-        otherOpen: null, toast: ''
+        sheet: null, draft: '', draftPhoto: null,
+        submitting: false, otherOpen: null, toast: ''
       };
       this._ptrs = new Map();
       this._pinch = null;
@@ -140,52 +142,35 @@ textarea,input{font-family:inherit}
       root.addEventListener('input', e => this.onInput(e));
       root.addEventListener('change', e => this.onChange(e));
 
-      try {
-        const s = JSON.parse(localStorage.getItem(KEY));
-        // id を持たない古いローカルデータは共有前のものなので引き継がない
-        if (s && s.id && s.name) this.state.mine = s;
-      } catch (e) {}
-
       this.render();
       this.init();
     }
 
     async init() {
-      const [theme, posts] = await Promise.all([Yosegaki.loadTheme(), Yosegaki.loadPosts()]);
-      if (theme) Object.assign(THEME, theme);
-      const myId = this.myId();
-      this.others = posts.filter(p => p && p.id !== myId);
-      // 共有データ側に自分の投稿が残っていれば、それを正とする(別端末で編集した場合など)
-      const remoteMine = posts.find(p => p && p.id === myId);
-      if (remoteMine) {
-        const local = this.state.mine || {};
-        this.state.mine = { ...remoteMine, photoLocal: local.photoLocal || null };
-        this.persist(this.state.mine);
+      if (!Yosegaki.isApi()) {
+        this.error = 'この寄せ書きは受付を終了しています（閲覧のみ）。';
+        this.loading = false; this.render(); return;
+      }
+      const id = Yosegaki.identity();
+      if (!id || !id.token) {
+        this.error = '招待リンクから開いてください。個人リンクがないと投稿できません。';
+        this.loading = false; this.render(); return;
+      }
+      try {
+        const [feed, me] = await Promise.all([Yosegaki.loadFeed(), Yosegaki.whoami()]);
+        Object.assign(THEME, feed.config || {});
+        this.displayName = me.displayName || '';
+        this.state.mine = me.post || null;
+        this.others = (feed.posts || []).filter(p => p && p.id !== id.customId);
+        this.root.style.background = THEME.bgColor;
+      } catch (e) {
+        this.error = e.status === 401 ? 'リンクが無効です。幹事にお問い合わせください。' : (e.message || '読み込みに失敗しました');
       }
       this.loading = false;
-      this.root.style.background = THEME.bgColor;
       this.render();
     }
 
-    myId() {
-      if (this.state.mine && this.state.mine.id) return this.state.mine.id;
-      let id = '';
-      try { id = localStorage.getItem(ID_KEY) || ''; } catch (e) {}
-      if (!id) {
-        id = 'u' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
-        try { localStorage.setItem(ID_KEY, id); } catch (e) {}
-      }
-      return id;
-    }
-
     setState(patch) { Object.assign(this.state, patch); this.render(); }
-
-    persist(mine) {
-      try {
-        if (mine) localStorage.setItem(KEY, JSON.stringify(mine));
-        else localStorage.removeItem(KEY);
-      } catch (e) {}
-    }
 
     flashToast(msg) {
       this.state.toast = msg;
@@ -198,7 +183,6 @@ textarea,input{font-family:inherit}
       const s = this.state;
       return `translate(calc(-50% + ${s.panX}px), calc(-50% + ${s.panY}px)) scale(${s.zoom})`;
     }
-
     updateTransform() {
       const canvas = this.root.querySelector('#canvas');
       if (canvas) canvas.style.transform = this.canvasTransform();
@@ -215,9 +199,20 @@ textarea,input{font-family:inherit}
         </div>`;
     }
 
+    errorScreen() {
+      return `<div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:32px">
+        <div style="background:#fff;border-radius:18px;box-shadow:0 4px 20px rgba(0,0,0,.12);padding:26px 22px;max-width:340px;text-align:center">
+          <div style="font-size:34px;margin-bottom:10px">✉️</div>
+          <div style="font-size:15px;line-height:1.8;color:#3d4148">${esc(this.error)}</div>
+          <a href="viewer.html" style="display:inline-block;margin-top:18px;color:#3b6ea5;font-weight:800;font-size:14px;text-decoration:none">みんなの寄せ書きを見る →</a>
+        </div>
+      </div>`;
+    }
+
     template() {
       const S = THEME;
       const st = this.state;
+      if (this.error) return this.errorScreen();
       const bg = bgStyles(S);
 
       const canvasStyle = {
@@ -226,7 +221,8 @@ textarea,input{font-family:inherit}
         transform: this.canvasTransform(),
         backgroundColor: S.bgColor,
         backgroundImage: bg.image,
-        backgroundSize: bg.size
+        backgroundSize: bg.size,
+        backgroundPosition: bg.img ? 'center' : 'initial'
       };
 
       let mineHtml = '';
@@ -234,7 +230,7 @@ textarea,input{font-family:inherit}
         const mineOut = envStyle(st.mine.x, st.mine.y, st.mine.deg, 900, '#2a5a30');
         mineOut.pinStyle.background = `radial-gradient(circle at 35% 30%, rgba(255,255,255,.9), rgba(255,255,255,0) 46%), #2f8a3e`;
         mineOut.bodyStyle.boxShadow = `0 2px 8px rgba(0,0,0,${S.shadow}), 0 0 0 2.5px #2f8a3e`;
-        mineHtml = this.envelopeHtml(mineOut, st.mine.name || 'あなた', 'open-mine', '');
+        mineHtml = this.envelopeHtml(mineOut, this.displayName || 'あなた', 'open-mine', '');
       }
 
       let pendingHtml = '';
@@ -251,10 +247,10 @@ textarea,input{font-family:inherit}
 
       const showGuide = !st.mine && !st.moving && !st.sheet && !this.loading;
       const showMoveBar = !!st.mine && !st.moving && !st.sheet;
-      const hasToken = !!Yosegaki.getToken();
+      const photoOn = S.photoMode !== 'text';
       const draftLen = st.draft.length;
       const counterColor = draftLen >= 200 ? '#c0392b' : '#9aa1ab';
-      const submitDisabled = st.submitting || draftLen === 0 || !st.draftName.trim() || (!hasToken && !st.draftToken.trim());
+      const submitDisabled = st.submitting || draftLen === 0;
       const submitLabel = st.submitting ? '保存中…' : (st.sheet === 'edit' ? '更新する' : 'この場所に投稿する');
       const submitStyle = {
         width: '100%', border: 'none', borderRadius: '12px', padding: '15px',
@@ -262,7 +258,6 @@ textarea,input{font-family:inherit}
         background: submitDisabled ? '#dfe2e6' : '#3b6ea5',
         color: submitDisabled ? '#a9adb3' : '#fff'
       };
-      const inputStyle = 'width:100%;border:1.5px solid #e3e6ea;border-radius:12px;padding:12px;font-size:15px;color:#333;outline:none;background:#fff';
 
       return `
         <div id="canvas" style="${styleStr(canvasStyle)}">
@@ -273,8 +268,8 @@ textarea,input{font-family:inherit}
         </div>
 
         <div style="position:absolute;top:calc(env(safe-area-inset-top) + 10px);left:12px;right:12px;z-index:12;background:rgba(255,255,255,.95);border-radius:14px;padding:10px 14px;box-shadow:0 2px 10px rgba(0,0,0,.15)">
-          <div style="font-size:12px;font-weight:700;color:#3b6ea5;margin-bottom:2px">寄せ書き受付中・2026/8/31まで</div>
-          <div style="font-size:11.5px;color:#777;line-height:1.5">やさしい言葉で、思い出に残るメッセージを届けよう。</div>
+          <div style="font-size:12px;font-weight:700;color:#3b6ea5;margin-bottom:2px">${esc(this.displayName)} さんとして投稿${S.deadline ? '・' + esc(S.deadline.slice(0, 10)) + 'まで' : ''}</div>
+          <div style="font-size:11.5px;color:#777;line-height:1.5">${esc(S.notice || 'やさしい言葉で、思い出に残るメッセージを届けよう。')}</div>
         </div>
 
         <button data-nopan="1" data-action="recenter" style="position:absolute;right:14px;top:calc(env(safe-area-inset-top) + 84px);z-index:14;width:44px;height:44px;border-radius:50%;border:none;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.22);font-size:19px;color:#3b6ea5;display:flex;align-items:center;justify-content:center">◎</button>
@@ -295,7 +290,7 @@ textarea,input{font-family:inherit}
         </div>` : ''}
 
         ${st.sheet ? `
-        <div data-nopan="1" style="position:absolute;left:0;right:0;bottom:0;z-index:30;background:#fff;border-radius:20px 20px 0 0;box-shadow:0 -6px 30px rgba(0,0,0,.25);padding:10px 20px calc(env(safe-area-inset-bottom) + 20px);animation:sheetin .22s ease-out;max-height:78dvh;overflow-y:auto;touch-action:pan-y">
+        <div data-nopan="1" style="position:absolute;left:0;right:0;bottom:0;z-index:30;background:#fff;border-radius:20px 20px 0 0;box-shadow:0 -6px 30px rgba(0,0,0,.25);padding:10px 20px calc(env(safe-area-inset-bottom) + 20px);animation:sheetin .22s ease-out;max-height:82dvh;overflow-y:auto;touch-action:pan-y">
           <div style="display:flex;justify-content:center;padding:2px 0 10px">
             <div style="width:44px;height:5px;border-radius:3px;background:#e0e3e8"></div>
           </div>
@@ -304,22 +299,17 @@ textarea,input{font-family:inherit}
             <button data-action="close-sheet" style="width:34px;height:34px;border-radius:50%;border:none;background:#eef0f3;font-size:15px;color:#666">✕</button>
           </div>
 
-          <input data-nopan="1" data-field="name" data-action="name-input" value="${esc(st.draftName)}" maxlength="12" placeholder="なまえ（12字まで）" autocomplete="off" style="${inputStyle};margin-bottom:12px">
+          <div style="font-size:12.5px;color:#8a9099;margin-bottom:12px">投稿者: <b style="color:#3b4652">${esc(this.displayName)}</b></div>
 
-          <label style="display:block;width:100%;height:130px;border-radius:12px;background:${st.draftPhoto ? 'transparent' : '#eef0f3'};display:flex;align-items:center;justify-content:center;color:#9aa1ab;font-size:13px;font-weight:700;margin-bottom:14px;cursor:pointer;overflow:hidden;border:1.5px dashed #c9cfd6;position:relative">
+          ${photoOn ? `
+          <label style="display:block;width:100%;height:130px;border-radius:12px;background:${st.draftPhoto ? 'transparent' : '#eef0f3'};display:flex;align-items:center;justify-content:center;color:#9aa1ab;font-size:13px;font-weight:700;margin-bottom:${st.draftPhoto ? '6px' : '14px'};cursor:pointer;overflow:hidden;border:1.5px dashed #c9cfd6">
             ${st.draftPhoto ? `<img src="${esc(st.draftPhoto)}" style="width:100%;height:100%;object-fit:cover">` : `<span>＋ 写真を追加（任意）</span>`}
             <input type="file" accept="image/*" data-action="photo-input" style="display:none">
           </label>
-          ${st.draftPhoto ? `<button data-action="remove-photo" style="border:none;background:transparent;color:#c0392b;font-weight:700;font-size:12px;padding:0 2px;margin:-8px 0 12px">写真を外す</button>` : ''}
+          ${st.draftPhoto ? `<button data-action="remove-photo" style="border:none;background:transparent;color:#c0392b;font-weight:700;font-size:12px;padding:0 2px;margin:0 0 12px">写真を外す</button>` : ''}` : ''}
 
           <textarea data-nopan="1" data-field="draft" data-action="draft-input" maxlength="200" placeholder="メッセージを書こう（200字まで）" style="width:100%;height:110px;border:1.5px solid #e3e6ea;border-radius:12px;padding:12px;font-size:15px;line-height:1.7;color:#333;resize:none;outline:none">${esc(st.draft)}</textarea>
-          <div style="text-align:right;font-size:12px;color:${counterColor};margin:4px 2px 12px">${draftLen} / 200</div>
-
-          ${!hasToken ? `
-          <div style="margin-bottom:14px">
-            <input data-nopan="1" data-field="token" data-action="token-input" value="${esc(st.draftToken)}" placeholder="投稿キー（招待リンクに含まれています）" autocomplete="off" style="${inputStyle}">
-            <div style="font-size:11.5px;color:#9aa1ab;margin-top:4px;line-height:1.6">幹事から届いた招待リンクから開くと自動で設定されます。初回のみ必要で、この端末に保存されます。</div>
-          </div>` : ''}
+          <div style="text-align:right;font-size:12px;color:${counterColor};margin:4px 2px 16px">${draftLen} / 200</div>
 
           <button data-action="submit" ${submitDisabled ? 'disabled' : ''} style="${styleStr(submitStyle)}">${submitLabel}</button>
 
@@ -335,7 +325,7 @@ textarea,input{font-family:inherit}
             <div style="font-size:18px;font-weight:800;color:#333">${esc(st.otherOpen.name || '')} さんより</div>
             <button data-action="close-other" style="width:34px;height:34px;border-radius:50%;border:none;background:#eef0f3;font-size:15px;color:#666">✕</button>
           </div>
-          ${st.otherOpen.photo ? `<img src="${esc(st.otherOpen.photo)}?v=${st.otherOpen.updatedAt || 0}" alt="" style="width:100%;max-height:280px;object-fit:cover;border-radius:12px;background:#e9ecef;margin-bottom:12px" onerror="this.style.display='none'">` : ''}
+          ${st.otherOpen.photo ? `<img src="${esc(st.otherOpen.photo)}" alt="" style="width:100%;max-height:280px;object-fit:cover;border-radius:12px;background:#e9ecef;margin-bottom:12px" onerror="this.style.display='none'">` : ''}
           <div style="font-size:15px;line-height:1.8;color:#3d4148">${esc(st.otherOpen.comment || '')}</div>
         </div>` : ''}
 
@@ -382,65 +372,50 @@ textarea,input{font-family:inherit}
 
     async submit() {
       const st = this.state;
-      const name = st.draftName.trim();
       const comment = st.draft.trim();
-      if (!name || !comment || st.submitting) return;
-
-      if (!Yosegaki.getToken()) {
-        const t = st.draftToken.trim();
-        if (!t) { this.flashToast('投稿キーを入力してください'); return; }
-        Yosegaki.setToken(t);
-      }
-
+      if (!comment || st.submitting) return;
       const wasEdit = st.sheet === 'edit';
       const pos = st.mine && wasEdit ? { x: st.mine.x, y: st.mine.y } : (st.pending || { x: 800, y: 700 });
-      const id = this.myId();
       const deg = st.mine && st.mine.deg != null ? st.mine.deg : +((Math.random() * 2 - 1) * THEME.tilt).toFixed(2);
 
-      const newPhoto = st.draftPhoto && st.draftPhoto.indexOf('data:') === 0 ? st.draftPhoto : null;
-      const keepPhoto = !!(st.draftPhoto && !newPhoto);
-      const removePhoto = !st.draftPhoto && !!(st.mine && st.mine.photo);
-
-      const post = { id, name, comment, photo: keepPhoto ? st.mine.photo : null, x: pos.x, y: pos.y, deg, updatedAt: Date.now() };
+      const isNewPhoto = !!(st.draftPhoto && st.draftPhoto.indexOf('data:') === 0);
+      const keepPhoto = !!(st.draftPhoto && !isNewPhoto);
 
       this.setState({ submitting: true });
       try {
-        await Yosegaki.savePost(post, { photoDataUrl: newPhoto, removePhoto });
-        const mine = { ...post, photoLocal: newPhoto || (keepPhoto && st.mine ? st.mine.photoLocal : null) };
-        this.persist(mine);
-        this.setState({ mine, sheet: null, pending: null, submitting: false, draftToken: '' });
+        const saved = await Yosegaki.savePost({
+          comment, x: pos.x, y: pos.y, deg,
+          photo: isNewPhoto ? st.draftPhoto : null,
+          keepPhoto
+        });
+        this.setState({ mine: saved, sheet: null, pending: null, submitting: false });
         this.flashToast(wasEdit ? '更新しました' : '投稿しました！');
       } catch (e) {
         this.setState({ submitting: false });
-        if (e && e.status === 401) {
-          Yosegaki.setToken('');
-          this.flashToast('投稿キーが正しくありません');
-        } else {
-          this.flashToast((e && e.message) || '保存に失敗しました');
-        }
+        this.flashToast((e && e.message) || '保存に失敗しました');
       }
     }
 
-    async pushMine(mine, okMsg) {
+    async moveMine(x, y) {
+      const st = this.state;
+      const optimistic = { ...st.mine, x, y };
+      this.setState({ mine: optimistic, pending: null, moving: false });
       try {
-        const post = {
-          id: mine.id, name: mine.name, comment: mine.comment, photo: mine.photo || null,
-          x: mine.x, y: mine.y, deg: mine.deg || 0, updatedAt: mine.updatedAt
-        };
-        await Yosegaki.savePost(post, {});
-        this.flashToast(okMsg);
+        const saved = await Yosegaki.savePost({
+          comment: st.mine.comment, x, y, deg: st.mine.deg || 0, keepPhoto: !!st.mine.hasPhoto
+        });
+        this.setState({ mine: saved });
+        this.flashToast('場所を変更しました');
       } catch (e) {
         this.flashToast((e && e.message) || '保存に失敗しました');
       }
     }
 
     async deleteMine() {
-      const mine = this.state.mine;
-      if (!mine || this.state.submitting) return;
+      if (!this.state.mine || this.state.submitting) return;
       this.setState({ submitting: true });
       try {
-        await Yosegaki.deletePost(mine.id, mine.name);
-        this.persist(null);
+        await Yosegaki.deletePost();
         this.setState({ mine: null, sheet: null, pending: null, moving: false, submitting: false });
         this.flashToast('投稿を削除しました');
       } catch (e) {
@@ -459,12 +434,7 @@ textarea,input{font-family:inherit}
         this.setState({ otherOpen: this.others[+t.dataset.idx] });
       } else if (action === 'open-mine') {
         if (this._d && this._d.moved) return;
-        this.setState({
-          sheet: 'edit',
-          draft: st.mine.comment,
-          draftName: st.mine.name || '',
-          draftPhoto: st.mine.photoLocal || st.mine.photo || null
-        });
+        this.setState({ sheet: 'edit', draft: st.mine.comment, draftPhoto: st.mine.photo || null });
       } else if (action === 'close-other') {
         this.setState({ otherOpen: null });
       } else if (action === 'recenter') {
@@ -493,13 +463,8 @@ textarea,input{font-family:inherit}
     }
 
     onInput(e) {
-      const a = e.target.dataset.action;
-      if (a === 'draft-input') {
+      if (e.target.dataset.action === 'draft-input') {
         this.setState({ draft: e.target.value.slice(0, 200) });
-      } else if (a === 'name-input') {
-        this.setState({ draftName: e.target.value.slice(0, 12) });
-      } else if (a === 'token-input') {
-        this.setState({ draftToken: e.target.value });
       }
     }
 
@@ -542,23 +507,17 @@ textarea,input{font-family:inherit}
       d.on = false;
       if (wasPinch) return;
       const st = this.state;
+      if (this.error) return;
       if (!d.moved && !st.sheet && !st.submitting) {
         if (!st.mine || st.moving) {
           const rect = d.rect;
           const cx = (e.clientX - rect.left - rect.width / 2 - st.panX) / st.zoom;
           const cy = (e.clientY - rect.top - rect.height / 2 - st.panY) / st.zoom;
           const x = Math.round(800 + cx), y = Math.round(800 + cy);
-          const wasMoving = st.moving;
-          if (wasMoving) {
-            const mine = { ...st.mine, x, y, updatedAt: Date.now() };
-            this.setState({ mine, pending: null, moving: false });
-            this.persist(mine);
-            this.pushMine(mine, '場所を変更しました');
+          if (st.moving) {
+            this.moveMine(x, y);
           } else {
-            this.setState({
-              pending: { x, y }, moving: false, sheet: 'new',
-              draft: '', draftName: (st.mine && st.mine.name) || '', draftPhoto: null
-            });
+            this.setState({ pending: { x, y }, moving: false, sheet: 'new', draft: '', draftPhoto: null });
           }
         }
       }

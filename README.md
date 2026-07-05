@@ -1,54 +1,90 @@
 # 寄せ書き
 
-地図の上にみんなの封筒(メッセージ+写真)をピンで置いていく寄せ書きサイト。
-GitHub Pages(`docs/` ディレクトリ)で動く静的サイトで、サーバーは使いません。
+Google Maps風の平面マップに、Wii伝言板のような封筒＋📍ピンでメッセージを寄せていく寄せ書きサービス。
 
-## ページ構成
+## 2フェーズ構成
+
+| フェーズ | 状態 | 技術 |
+|---|---|---|
+| 収集フェーズ | 動的（寄稿者が投稿できる） | Cloudflare Workers + KV（`worker/`） |
+| 完成フェーズ | 静的・不変・永久 | 焼き固めた `docs/data/*.json` → GitHub Pages |
+
+`docs/config.js` の `api` に Worker の URL を入れると収集フェーズ、空にすると静的な完成フェーズとして動きます。
+
+## ページ構成（`docs/`）
 
 | ページ | 役割 |
 |---|---|
-| `docs/index.html` | メニュー |
-| `docs/viewer.html` | みんなの投稿を閲覧(封筒タップでメッセージ・写真を表示) |
-| `docs/contribute.html` | 地図にピンを置いてメッセージを投稿・編集・削除 |
-| `docs/editor.html` | 見た目の調整エディタ(幹事用)。「公開デザインとして保存」で全員に反映 |
+| `index.html` | メニュー |
+| `viewer.html` | みんなの投稿を閲覧（封筒タップでメッセージ・写真、名前検索、現在地ボタン） |
+| `contribute.html` | 個人リンクから開き、地図にピンを置いて投稿・編集・移動・削除 |
+| `admin.html` | 幹事用。収集設定・背景・中心地・**個人リンクの発行** |
+| `editor.html` | 封筒/ピン/配色をスライダーで微調整し、公開設定へ反映 |
 
-## データの仕組み
+## バックエンド（`worker/`）
 
-- 投稿データはこのリポジトリの `docs/data/` にコミットされます
-  - `docs/data/posts.json` — 全投稿(名前・メッセージ・位置・写真パス)
-  - `docs/data/photos/<id>.jpg` — 投稿写真
-  - `docs/data/theme.json` — エディタで保存した公開デザイン設定
-  - `docs/data/center.jpg` — 中心地の画像
-- **読み取り**: GitHub Pages 上の同一オリジンから `fetch` するだけ(キー不要)
-- **書き込み**: ブラウザから GitHub Contents API を直接呼びます。認証には「投稿キー」(Fine-grained PAT)を使います
-- 同時投稿は sha の競合検出+リトライで保護しています
-- 投稿してから viewer に反映されるまで、GitHub Pages の再デプロイぶん(1〜2分)かかります
+Cloudflare Worker が収集フェーズの API を提供します。書き込み権限はサーバー側に隠れ、
+ブラウザには一切露出しません。API ロジックは `worker/src/core.js` に集約し、
+本番（Worker）とローカルモック（`tools/mock-server.mjs`）で共有しています。
 
-## 幹事のセットアップ
+主なエンドポイント:
 
-1. GitHub で Fine-grained personal access token を作成する
-   - **Repository access**: このリポジトリのみ
-   - **Permissions**: Contents → Read and write(それ以外は不要)
-   - 有効期限は寄せ書きの受付期間に合わせて短めに
-2. 招待リンクを参加者に配る(URLの `#k=` 以降がトークン):
+- `GET  /api/feed` — 全投稿＋公開設定（閲覧・収集画面用、公開）
+- `GET  /api/config` — 公開設定（公開）
+- `GET  /api/whoami?c=&t=` — 個人リンクの本人確認＋自分の既存投稿（トークン必須）
+- `POST /api/post` / `DELETE /api/post` — 投稿の作成/更新・削除（`customId`＋トークンを照合）
+- `PUT  /api/config` / `PUT|DELETE /api/asset/:name` / `POST|GET /api/links` / `DELETE /api/link/:id` — 管理者専用（`Authorization: Bearer <ADMIN_KEY>`）
+- `GET  /api/photo/:key` — 画像配信
 
-   ```
-   https://<あなたのPagesドメイン>/contribute.html#k=<トークン>
-   ```
+### なりすまし防止
 
-   リンクを開くとトークンは端末の localStorage に保存され、URLからは即座に消えます。
-3. デザインを調整する場合は `editor.html` を開き、「配置」タブ →「公開デザインとして保存」
+管理者が個人リンクを発行すると、`カスタムid → ランダムトークン` が KV に保存されます
+（`link:<customId>`）。投稿時はこの2つを照合するため、**カスタムidを知っているだけでは
+他人として投稿できません**。表示名も発行時に確定し、投稿者は変更できません。
+
+## セットアップ（幹事）
+
+### 1. Worker をデプロイ
+
+```sh
+cd worker
+npx wrangler kv namespace create YOSEGAKI_KV   # 出力の id を wrangler.toml に貼る
+npx wrangler secret put ADMIN_KEY              # 管理者キーを設定
+npx wrangler deploy
+```
+
+### 2. サイトを Worker に接続
+
+`docs/config.js` の `api` にデプロイした Worker の URL を設定してコミット
+（例: `api: "https://yosegaki.xxx.workers.dev"`）。
+※ `admin.html` から一時的に接続先を設定して試すこともできます（この端末にのみ保存）。
+
+### 3. 収集設定と個人リンク発行
+
+`admin.html` を開き、管理者キーで接続 → タイトル・注意書き・投稿モード（写真あり/なし）・
+締切・背景・中心地画像を設定し、参加者ごとに個人リンクを発行して配布します。
+
+- リンク形式: `contribute.html?c=<カスタムid>#t=<トークン>`
+- 開くとトークンは端末に保存され、URL からは即消去されます
+
+### 4. 完成後の焼き固め（永久保存）
+
+受付終了後、収集データを `docs/data/` に焼き込んで静的化します（`docs/config.js` の
+`api` を空にすると `docs/data/*.json` を読む完成フェーズになります）。
+`GET /api/feed` と `/api/photo/*` を取得して `docs/data/posts.json` / `config.json` /
+`photos/` に書き出す焼き固めスクリプトは今後追加予定です。
+
+## ローカル開発・テスト
+
+Worker と同じ `core.js` を使うモックサーバーで、Cloudflare なしに全フローを試せます。
+
+```sh
+node tools/mock-server.mjs 8787 --admin=admin-secret
+# http://localhost:8787/admin.html を開き、URL に http://localhost:8787、キーに admin-secret
+```
 
 ## 注意事項
 
-- 招待リンクを持っている人は誰でもこのリポジトリの**コンテンツを書き換えられます**。リンクは参加者以外に共有しないでください。寄せ書き専用のリポジトリで運用することを推奨します
-- トークンをリポジトリ内のファイルに書かないでください(GitHub の secret scanning により自動失効します)
-- 受付終了後はトークンを失効(revoke)させれば、サイトは閲覧専用になります
-
-## ローカル開発
-
-```sh
-cd docs && python3 -m http.server 8000
-```
-
-`http://localhost:8000` で確認できます。書き込み操作は本物のリポジトリに対して行われる点に注意してください。
+- 個人リンクは本人に直接渡してください（トークンが本人性の担保です）
+- `ADMIN_KEY` や KV id はコミットしないでください（`wrangler secret` / ローカル設定で管理）
+- 完成フェーズに移す＝ Worker を止めても、Git に焼き込んだ本体は永久に残ります

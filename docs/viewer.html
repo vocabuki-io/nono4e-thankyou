@@ -17,6 +17,7 @@ html,body{margin:0;padding:0;height:100%;overscroll-behavior:none;background:#e4
 </head>
 <body>
 <div id="app"></div>
+<script src="config.js"></script>
 <script src="store.js"></script>
 <script>
 (function () {
@@ -31,7 +32,8 @@ html,body{margin:0;padding:0;height:100%;overscroll-behavior:none;background:#e4
     shadow: 0.18, tilt: 4, nameSize: 12, nameColor: '#6b5c26',
     pinSize: 18, pinColor: '#e23b2e', pinOffset: -8,
     bgPattern: 'stripe', bgColor: '#e4e7ea', patDensity: 0.05,
-    font: 'zen', centerSize: 210, centerImg: false
+    font: 'zen', centerSize: 210, centerImg: false,
+    centerUrl: null, bgUrl: null, photoMode: 'photo'
   };
 
   function styleStr(obj) {
@@ -47,6 +49,9 @@ html,body{margin:0;padding:0;height:100%;overscroll-behavior:none;background:#e4
 
   function bgStyles(S) {
     const a = S.patDensity;
+    if (S.bgPattern === 'image' && S.bgUrl) {
+      return { image: `url('${S.bgUrl}')`, size: 'cover', extra: 'background-position:center' };
+    }
     let image = 'linear-gradient(rgba(255,255,255,.35), rgba(0,0,0,.03))';
     let size = 'auto';
     if (S.bgPattern === 'stripe') {
@@ -65,9 +70,9 @@ html,body{margin:0;padding:0;height:100%;overscroll-behavior:none;background:#e4
       transform: 'translate(-50%,-50%)', borderRadius: '14px',
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '12px'
     };
-    if (S.centerImg) {
+    if (S.centerUrl) {
       Object.assign(base, {
-        background: "center / cover no-repeat url('data/center.jpg'), #fff",
+        background: `center / cover no-repeat url('${S.centerUrl}'), #fff`,
         border: '4px solid #fff', boxShadow: '0 3px 14px rgba(0,0,0,.22)', padding: 0
       });
       return `<div style="${styleStr(base)}"></div>`;
@@ -100,9 +105,14 @@ html,body{margin:0;padding:0;height:100%;overscroll-behavior:none;background:#e4
     }
 
     async init() {
-      const [theme, posts] = await Promise.all([Yosegaki.loadTheme(), Yosegaki.loadPosts()]);
-      if (theme) Object.assign(THEME, theme);
-      this.data = posts.slice().sort((a, b) => (a.updatedAt || 0) - (b.updatedAt || 0));
+      try {
+        const feed = await Yosegaki.loadFeed();
+        if (feed.config) Object.assign(THEME, feed.config);
+        const posts = Array.isArray(feed.posts) ? feed.posts : [];
+        this.data = posts.slice().sort((a, b) => (a.updatedAt || 0) - (b.updatedAt || 0));
+      } catch (e) {
+        this.data = [];
+      }
       this.loading = false;
       this.root.style.background = THEME.bgColor;
       this.render();
@@ -139,11 +149,12 @@ html,body{margin:0;padding:0;height:100%;overscroll-behavior:none;background:#e4
         position: 'absolute', top: 0, left: 0, right: 0, height: '46%',
         background: S.flapColor, clipPath: 'polygon(0 0, 100% 0, 50% 100%)'
       };
-      const nameStyle = {
-        position: 'absolute', bottom: '7%', left: 0, right: 0,
-        textAlign: 'center', fontSize: S.nameSize + 'px',
-        fontWeight: 700, color: S.nameColor, whiteSpace: 'nowrap', overflow: 'hidden'
-      };
+      const nameStyle = S.photoMode === 'text'
+        ? { position: 'absolute', top: '8%', right: '8%', textAlign: 'right', fontSize: S.nameSize + 'px',
+            fontWeight: 700, color: S.nameColor, whiteSpace: 'nowrap', overflow: 'hidden', maxWidth: '80%' }
+        : { position: 'absolute', bottom: '7%', left: 0, right: 0,
+            textAlign: 'center', fontSize: S.nameSize + 'px',
+            fontWeight: 700, color: S.nameColor, whiteSpace: 'nowrap', overflow: 'hidden' };
       const pinStyle = {
         position: 'absolute', top: S.pinOffset + 'px', left: '50%',
         transform: 'translateX(-50%)',
@@ -176,7 +187,8 @@ html,body{margin:0;padding:0;height:100%;overscroll-behavior:none;background:#e4
         transform: this.canvasTransform(),
         backgroundColor: S.bgColor,
         backgroundImage: bg.image,
-        backgroundSize: bg.size
+        backgroundSize: bg.size,
+        backgroundPosition: bg.extra ? 'center' : 'initial'
       };
 
       return `

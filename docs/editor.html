@@ -23,6 +23,7 @@ input[type="color"]::-webkit-color-swatch{border:none;border-radius:5px}
 </head>
 <body>
 <div id="app"></div>
+<script src="config.js"></script>
 <script src="store.js"></script>
 <script>
 (function () {
@@ -159,13 +160,19 @@ input[type="color"]::-webkit-color-swatch{border:none;border-radius:5px}
       this._tt = setTimeout(() => this.setState({ toast: '' }), 1800);
     }
 
-    // 現在の設定を data/theme.json(+中心地画像)として保存し、viewer/contribute に反映する
+    // 現在の見た目設定を Worker の公開設定に反映する（viewer/contribute へ即時反映）
     async publish() {
       if (this._publishing) return;
-      if (!Yosegaki.getToken()) {
-        const t = prompt('投稿キー（幹事用のGitHubトークン）を入力してください');
-        if (!t || !t.trim()) return;
-        Yosegaki.setToken(t.trim());
+      const A = Yosegaki.admin;
+      if (!A.getApi()) {
+        const api = prompt('Worker の URL を入力してください（例: https://yosegaki.xxx.workers.dev）');
+        if (!api || !api.trim()) return;
+        A.setApi(api.trim());
+      }
+      if (!A.hasKey()) {
+        const k = prompt('管理者キーを入力してください');
+        if (!k || !k.trim()) return;
+        A.setKey(k.trim());
       }
       const S = this.state.settings;
       const theme = {
@@ -174,18 +181,17 @@ input[type="color"]::-webkit-color-swatch{border:none;border-radius:5px}
         shadow: S.shadow, tilt: S.tilt, nameSize: S.nameSize, nameColor: S.nameColor,
         pinSize: S.pinSize, pinColor: S.pinColor, pinOffset: S.pinOffset,
         bgPattern: S.bgPattern, bgColor: S.bgColor, patDensity: S.patDensity,
-        font: S.font, centerSize: S.centerSize,
-        centerImg: !!this.state.centerImg
+        font: S.font, centerSize: S.centerSize
       };
       this._publishing = true;
       this.flashToast('保存中…');
       try {
-        if (this.state.centerImg) await Yosegaki.saveCenterImage(this.state.centerImg);
-        else await Yosegaki.removeCenterImage();
-        await Yosegaki.saveTheme(theme);
-        this.flashToast('公開デザインを保存しました（反映まで1〜2分）');
+        if (this.state.centerImg) await A.uploadAsset('center', this.state.centerImg);
+        else await A.deleteAsset('center');
+        await A.putConfig(theme);
+        this.flashToast('公開デザインを保存しました');
       } catch (e) {
-        if (e && e.status === 401) Yosegaki.setToken('');
+        if (e && e.status === 401) A.setKey('');
         this.flashToast((e && e.message) || '保存に失敗しました');
       } finally {
         this._publishing = false;
