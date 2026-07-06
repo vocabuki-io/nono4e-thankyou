@@ -12,6 +12,7 @@ html,body{margin:0;padding:0;height:100%;overscroll-behavior:none;background:#e4
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 @keyframes sheetin{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
 @keyframes pinpop{0%{transform:translate(-50%,-50%) scale(.4);opacity:0}70%{transform:translate(-50%,-50%) scale(1.15);opacity:1}100%{transform:translate(-50%,-50%) scale(1)}}
+@keyframes recenterpulse{0%,100%{background:#fff;color:#3b6ea5;box-shadow:0 2px 10px rgba(0,0,0,.22)}50%{background:#3b6ea5;color:#fff;box-shadow:0 0 0 5px rgba(59,110,165,.35),0 2px 10px rgba(0,0,0,.22)}}
 #app{position:fixed;inset:0;overflow:hidden;font-family:'Zen Maru Gothic',sans-serif;touch-action:none;user-select:none;-webkit-user-select:none}
 </style>
 </head>
@@ -86,7 +87,7 @@ html,body{margin:0;padding:0;height:100%;overscroll-behavior:none;background:#e4
       this.root = root;
       this.data = [];
       this.loading = true;
-      this.state = { panX: 0, panY: 0, zoom: 1, open: null, query: '', focused: false };
+      this.state = { panX: 0, panY: 0, zoom: 1, open: null, query: '', focused: false, recentering: false };
       this._ptrs = new Map();
       this._pinch = null;
       this._d = null;
@@ -217,7 +218,7 @@ html,body{margin:0;padding:0;height:100%;overscroll-behavior:none;background:#e4
         ${this.loading ? `<div style="position:absolute;left:50%;bottom:calc(env(safe-area-inset-bottom) + 26px);transform:translateX(-50%);z-index:12;background:rgba(40,44,50,.88);color:#fff;font-size:13px;font-weight:700;border-radius:999px;padding:11px 18px;white-space:nowrap">読み込み中…</div>` : ''}
         ${!this.loading && this.data.length === 0 ? `<div style="position:absolute;left:50%;bottom:calc(env(safe-area-inset-bottom) + 26px);transform:translateX(-50%);z-index:12;background:rgba(40,44,50,.88);color:#fff;font-size:13px;font-weight:700;border-radius:999px;padding:11px 18px;white-space:nowrap;max-width:88vw;overflow:hidden;text-overflow:ellipsis">まだ投稿がありません。最初のメッセージを寄せよう！</div>` : ''}
 
-        <button data-nopan="1" data-action="recenter" style="position:absolute;right:14px;bottom:calc(env(safe-area-inset-bottom) + 20px);z-index:15;width:46px;height:46px;border-radius:50%;border:none;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.22);font-size:20px;color:#3b6ea5;display:flex;align-items:center;justify-content:center">◎</button>
+        <button data-nopan="1" data-action="recenter" style="position:absolute;right:14px;bottom:calc(env(safe-area-inset-bottom) + 20px);z-index:15;width:46px;height:46px;border-radius:50%;border:none;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.22);font-size:20px;color:#3b6ea5;display:flex;align-items:center;justify-content:center${st.recentering ? ';animation:recenterpulse .45s ease 2' : ''}">◎</button>
 
         ${st.open ? `
         <div data-nopan="1" style="position:absolute;left:0;right:0;bottom:0;z-index:30;background:#fff;border-radius:20px 20px 0 0;box-shadow:0 -6px 30px rgba(0,0,0,.25);padding:10px 20px calc(env(safe-area-inset-bottom) + 22px);animation:sheetin .22s ease-out;max-height:70dvh;overflow-y:auto">
@@ -228,7 +229,7 @@ html,body{margin:0;padding:0;height:100%;overscroll-behavior:none;background:#e4
             <div style="font-size:18px;font-weight:800;color:#333">${esc(st.open.name || '')} さんより</div>
             <button data-action="close-sheet" style="width:34px;height:34px;border-radius:50%;border:none;background:#eef0f3;font-size:15px;color:#666">✕</button>
           </div>
-          ${st.open.photo ? `<img src="${esc(st.open.photo)}?v=${st.open.updatedAt || 0}" alt="" style="width:100%;max-height:280px;object-fit:cover;border-radius:12px;background:#e9ecef;margin-bottom:12px" onerror="this.style.display='none'">` : ''}
+          ${st.open.photo ? `<img src="${esc(st.open.photo)}?v=${st.open.updatedAt || 0}" alt="" style="width:100%;max-height:62dvh;object-fit:contain;border-radius:12px;background:#f0f2f4;margin-bottom:12px" onerror="this.style.display='none'">` : ''}
           <div style="font-size:15px;line-height:1.8;color:#3d4148">${esc(st.open.comment || '')}</div>
         </div>` : ''}
       `;
@@ -266,7 +267,9 @@ html,body{margin:0;padding:0;height:100%;overscroll-behavior:none;background:#e4
       } else if (action === 'clear-query') {
         this.setState({ query: '', focused: false });
       } else if (action === 'recenter') {
-        this.setState({ panX: 0, panY: 0, zoom: 1 });
+        this.setState({ panX: 0, panY: 0, zoom: 1, recentering: true });
+        clearTimeout(this._rt);
+        this._rt = setTimeout(() => this.setState({ recentering: false }), 950);
       } else if (action === 'goto-result') {
         const d = this.data[+t.dataset.idx];
         this.setState({ panX: -(d.x - 800), panY: -(d.y - 800), focused: false, open: null });
