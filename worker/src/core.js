@@ -196,8 +196,16 @@ export async function handleApi(ctx, kv, adminKey) {
     return res(200, { config: publicConfig({ ...DEFAULT_CONFIG, ...cfg }, origin), posts });
   }
 
+  // ---- 投稿の削除（管理者：idをパスで指定） ----
+  if (seg[0] === 'post' && seg[1] && method === 'DELETE') {
+    needAdmin();
+    await kv.delete('post:' + seg[1]);
+    await kv.delete('photo:' + seg[1]);
+    return res(200, { ok: true });
+  }
+
   // ---- 投稿の作成/更新・削除（投稿者） ----
-  if (seg[0] === 'post') {
+  if (seg[0] === 'post' && !seg[1]) {
     const rec = await auth();
     if (method === 'DELETE') {
       await kv.delete('post:' + rec.customId);

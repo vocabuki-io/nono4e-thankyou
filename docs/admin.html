@@ -52,7 +52,7 @@
 (function () {
   const root = document.getElementById('root');
   const A = Yosegaki.admin;
-  let state = { config: null, links: [], loading: false, newName: '', newCid: '' };
+  let state = { config: null, links: [], posts: [], loading: false, newName: '', newCid: '' };
   let toastTimer = null;
 
   function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -67,8 +67,8 @@
     if(!A.hasKey() || !A.getApi()) { render(); return; }
     state.loading = true; render();
     try {
-      const [cfg, links] = await Promise.all([A.getConfig(), A.listLinks()]);
-      state.config = cfg; state.links = links.links || [];
+      const [cfg, links, posts] = await Promise.all([A.getConfig(), A.listLinks(), A.listPosts()]);
+      state.config = cfg; state.links = links.links || []; state.posts = posts || [];
     } catch(e){
       if(e.status===401){ A.setKey(''); toast('管理者キーが正しくありません'); }
       else toast(e.message||'読み込みに失敗しました');
@@ -146,6 +146,23 @@
         <div style="margin-top:6px">
           ${state.links.length===0 ? `<p class="hint">まだ発行していません。</p>` : state.links.map(linkItem).join('')}
         </div>
+      </div>
+
+      <div class="card">
+        <h2>投稿の管理</h2>
+        ${state.posts.length===0 ? `<p class="hint">まだ投稿はありません。</p>` : state.posts.slice().sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0)).map(postItem).join('')}
+      </div>`;
+  }
+
+  function postItem(p){
+    const snippet = String(p.comment||'').replace(/\s+/g,' ').slice(0,40);
+    return `
+      <div class="link-item">
+        <div class="top">
+          <div><span class="nm">${esc(p.name)}</span> ${p.photo?`<span class="cid">📷 写真あり</span>`:''}</div>
+          <button class="btn danger" data-delpost="${esc(p.id)}" data-name="${esc(p.name)}">削除</button>
+        </div>
+        <div style="font-size:12.5px;color:#5a6069;line-height:1.6;margin-top:6px">${esc(snippet)}${(p.comment||'').length>40?'…':''}</div>
       </div>`;
   }
 
@@ -256,6 +273,13 @@
       b.onclick = async ()=>{
         if(!confirm('このリンクを取り消しますか？（投稿者は編集できなくなります）')) return;
         try { await A.revokeLink(b.dataset.revoke); await refresh(); toast('取り消しました'); }
+        catch(e){ toast(e.message); }
+      };
+    });
+    root.querySelectorAll('[data-delpost]').forEach(b=>{
+      b.onclick = async ()=>{
+        if(!confirm('「'+b.dataset.name+'」さんの投稿を削除しますか？この操作は取り消せません。')) return;
+        try { await A.deletePost(b.dataset.delpost); await refresh(); toast('投稿を削除しました'); }
         catch(e){ toast(e.message); }
       };
     });
