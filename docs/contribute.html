@@ -72,7 +72,7 @@ textarea,input{font-family:inherit}
     };
     if (S.centerUrl) {
       Object.assign(base, {
-        background: `center / cover no-repeat url('${S.centerUrl}'), #fff`,
+        background: `center / contain no-repeat url('${S.centerUrl}'), #fff`,
         border: '4px solid #fff', boxShadow: '0 3px 14px rgba(0,0,0,.22)', padding: 0
       });
       return `<div style="${styleStr(base)}"></div>`;
