@@ -13,6 +13,7 @@ html,body{margin:0;padding:0;height:100%;overscroll-behavior:none;background:#e4
 @keyframes sheetin{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
 @keyframes dashpulse{0%,100%{opacity:.35}50%{opacity:1}}
 @keyframes toastin{from{opacity:0;transform:translate(-50%,8px)}to{opacity:1;transform:translate(-50%,0)}}
+@keyframes recenterpulse{0%,100%{background:#fff;color:#3b6ea5;box-shadow:0 2px 10px rgba(0,0,0,.22)}50%{background:#3b6ea5;color:#fff;box-shadow:0 0 0 5px rgba(59,110,165,.35),0 2px 10px rgba(0,0,0,.22)}}
 textarea,input{font-family:inherit}
 #app{position:fixed;inset:0;overflow:hidden;font-family:'Zen Maru Gothic',sans-serif;touch-action:none;user-select:none;-webkit-user-select:none}
 </style>
@@ -126,7 +127,7 @@ textarea,input{font-family:inherit}
         panX: 0, panY: 0, zoom: 1,
         mine: null, pending: null, moving: false,
         sheet: null, draft: '', draftPhoto: null,
-        submitting: false, otherOpen: null, toast: ''
+        submitting: false, otherOpen: null, toast: '', recentering: false
       };
       this._ptrs = new Map();
       this._pinch = null;
@@ -272,7 +273,7 @@ textarea,input{font-family:inherit}
           <div style="font-size:11.5px;color:#777;line-height:1.5">${esc(S.notice || 'やさしい言葉で、思い出に残るメッセージを届けよう。')}</div>
         </div>
 
-        <button data-nopan="1" data-action="recenter" style="position:absolute;right:14px;top:calc(env(safe-area-inset-top) + 84px);z-index:14;width:44px;height:44px;border-radius:50%;border:none;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.22);font-size:19px;color:#3b6ea5;display:flex;align-items:center;justify-content:center">◎</button>
+        <button data-nopan="1" data-action="recenter" style="position:absolute;right:14px;bottom:calc(env(safe-area-inset-bottom) + 84px);z-index:14;width:46px;height:46px;border-radius:50%;border:none;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.22);font-size:20px;color:#3b6ea5;display:flex;align-items:center;justify-content:center${st.recentering ? ';animation:recenterpulse .45s ease 2' : ''}">◎</button>
 
         ${this.loading ? `<div style="position:absolute;left:50%;bottom:calc(env(safe-area-inset-bottom) + 26px);transform:translateX(-50%);z-index:12;background:rgba(40,44,50,.88);color:#fff;font-size:13px;font-weight:700;border-radius:999px;padding:11px 18px;white-space:nowrap">読み込み中…</div>` : ''}
         ${showGuide ? `<div style="position:absolute;left:50%;bottom:calc(env(safe-area-inset-bottom) + 26px);transform:translateX(-50%);z-index:12;background:rgba(40,44,50,.88);color:#fff;font-size:13px;font-weight:700;border-radius:999px;padding:11px 18px;white-space:nowrap">マップをタップしてピンを置こう</div>` : ''}
@@ -302,8 +303,8 @@ textarea,input{font-family:inherit}
           <div style="font-size:12.5px;color:#8a9099;margin-bottom:12px">投稿者: <b style="color:#3b4652">${esc(this.displayName)}</b></div>
 
           ${photoOn ? `
-          <label style="display:block;width:100%;height:130px;border-radius:12px;background:${st.draftPhoto ? 'transparent' : '#eef0f3'};display:flex;align-items:center;justify-content:center;color:#9aa1ab;font-size:13px;font-weight:700;margin-bottom:${st.draftPhoto ? '6px' : '14px'};cursor:pointer;overflow:hidden;border:1.5px dashed #c9cfd6">
-            ${st.draftPhoto ? `<img src="${esc(st.draftPhoto)}" style="width:100%;height:100%;object-fit:cover">` : `<span>＋ 写真を追加（任意）</span>`}
+          <label style="display:block;width:100%;${st.draftPhoto ? '' : 'height:130px;'}border-radius:12px;background:${st.draftPhoto ? '#f0f2f4' : '#eef0f3'};display:flex;align-items:center;justify-content:center;color:#9aa1ab;font-size:13px;font-weight:700;margin-bottom:${st.draftPhoto ? '6px' : '14px'};cursor:pointer;overflow:hidden;border:1.5px dashed #c9cfd6">
+            ${st.draftPhoto ? `<img src="${esc(st.draftPhoto)}" style="width:100%;max-height:50dvh;object-fit:contain;display:block">` : `<span>＋ 写真を追加（任意）</span>`}
             <input type="file" accept="image/*" data-action="photo-input" style="display:none">
           </label>
           ${st.draftPhoto ? `<button data-action="remove-photo" style="border:none;background:transparent;color:#c0392b;font-weight:700;font-size:12px;padding:0 2px;margin:0 0 12px">写真を外す</button>` : ''}` : ''}
@@ -325,7 +326,7 @@ textarea,input{font-family:inherit}
             <div style="font-size:18px;font-weight:800;color:#333">${esc(st.otherOpen.name || '')} さんより</div>
             <button data-action="close-other" style="width:34px;height:34px;border-radius:50%;border:none;background:#eef0f3;font-size:15px;color:#666">✕</button>
           </div>
-          ${st.otherOpen.photo ? `<img src="${esc(st.otherOpen.photo)}" alt="" style="width:100%;max-height:280px;object-fit:cover;border-radius:12px;background:#e9ecef;margin-bottom:12px" onerror="this.style.display='none'">` : ''}
+          ${st.otherOpen.photo ? `<img src="${esc(st.otherOpen.photo)}" alt="" style="width:100%;max-height:62dvh;object-fit:contain;border-radius:12px;background:#f0f2f4;margin-bottom:12px" onerror="this.style.display='none'">` : ''}
           <div style="font-size:15px;line-height:1.8;color:#3d4148">${esc(st.otherOpen.comment || '')}</div>
         </div>` : ''}
 
@@ -438,7 +439,9 @@ textarea,input{font-family:inherit}
       } else if (action === 'close-other') {
         this.setState({ otherOpen: null });
       } else if (action === 'recenter') {
-        this.setState({ panX: 0, panY: 0, zoom: 1 });
+        this.setState({ panX: 0, panY: 0, zoom: 1, recentering: true });
+        clearTimeout(this._rt);
+        this._rt = setTimeout(() => this.setState({ recentering: false }), 950);
       } else if (action === 'start-move') {
         this.setState({ moving: true });
       } else if (action === 'cancel-move') {
