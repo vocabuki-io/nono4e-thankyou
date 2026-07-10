@@ -245,6 +245,29 @@ export async function handleApi(ctx, kv, adminKey) {
     }
   }
 
+  // ---- 全投稿の一括削除（管理者）: 投稿本文と写真を消す。リンク・デザインは残す ----
+  if (seg[0] === 'posts' && method === 'DELETE') {
+    needAdmin();
+    const keys = await kv.list('post:');
+    for (const k of keys) {
+      const id = k.slice('post:'.length);
+      await kv.delete(k);
+      await kv.delete('photo:' + id);
+    }
+    return res(200, { ok: true, deleted: keys.length });
+  }
+
+  // ---- 環境の初期化（管理者）: 投稿・写真・リンク・設定をすべて削除 ----
+  if (seg[0] === 'reset' && method === 'POST') {
+    needAdmin();
+    for (const prefix of ['post:', 'photo:', 'link:']) {
+      const keys = await kv.list(prefix);
+      for (const k of keys) await kv.delete(k);
+    }
+    await kv.delete(CFG_KEY);
+    return res(200, { ok: true });
+  }
+
   return res(404, { error: 'not found' });
 }
 

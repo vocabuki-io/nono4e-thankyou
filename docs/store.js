@@ -112,7 +112,9 @@
     listLinks() { return apiFetch('/api/links?t=' + Date.now(), { headers: admin._headers() }); },
     revokeLink(customId) { return apiFetch('/api/link/' + encodeURIComponent(customId), { method: 'DELETE', headers: admin._headers() }); },
     listPosts() { return apiFetch('/api/feed?t=' + Date.now()).then(f => (f && f.posts) || []); },
-    deletePost(customId) { return apiFetch('/api/post/' + encodeURIComponent(customId), { method: 'DELETE', headers: admin._headers() }); }
+    deletePost(customId) { return apiFetch('/api/post/' + encodeURIComponent(customId), { method: 'DELETE', headers: admin._headers() }); },
+    deleteAllPosts() { return apiFetch('/api/posts', { method: 'DELETE', headers: admin._headers() }); },
+    resetAll() { return apiFetch('/api/reset', { method: 'POST', headers: admin._headers() }); }
   };
 
   function linkFor(customId, token) {

@@ -150,7 +150,18 @@
 
       <div class="card">
         <h2>投稿の管理</h2>
-        ${state.posts.length===0 ? `<p class="hint">まだ投稿はありません。</p>` : state.posts.slice().sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0)).map(postItem).join('')}
+        ${state.posts.length===0 ? `<p class="hint">まだ投稿はありません。</p>` : `
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <span class="hint" style="margin:0">${state.posts.length}件の投稿</span>
+            <button class="btn danger" id="b-delall" style="font-size:13px">すべての投稿を削除</button>
+          </div>
+          ${state.posts.slice().sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0)).map(postItem).join('')}`}
+      </div>
+
+      <div class="card" style="border:1.5px solid #f3d6d1">
+        <h2 style="color:#c0392b">環境の初期化</h2>
+        <p class="hint" style="margin-top:0">投稿・写真・発行済みリンク・収集設定を<b>すべて削除</b>して初期状態に戻します。この操作は取り消せません。デザインをやり直したいときや、テストデータを一掃したいときに使います。</p>
+        <div style="margin-top:12px"><button class="btn danger" id="b-reset" style="background:#c0392b;color:#fff;padding:11px 16px;font-size:14px">環境を初期化（全データ削除）</button></div>
       </div>`;
   }
 
@@ -283,6 +294,20 @@
         catch(e){ toast(e.message); }
       };
     });
+    const delAll = document.getElementById('b-delall');
+    if(delAll) delAll.onclick = async ()=>{
+      if(!confirm('現在のすべての投稿（メッセージと写真）を削除しますか？この操作は取り消せません。')) return;
+      try { const r = await A.deleteAllPosts(); await refresh(); toast((r&&r.deleted!=null?r.deleted+'件の':'')+'投稿を削除しました'); }
+      catch(e){ toast(e.message||'削除に失敗しました'); }
+    };
+    const resetBtn = document.getElementById('b-reset');
+    if(resetBtn) resetBtn.onclick = async ()=>{
+      const ans = prompt('環境を初期化するとすべてのデータ（投稿・写真・リンク・設定）が消えます。\nよろしければ「リセット」と入力してください。');
+      if(ans==null) return;
+      if(ans.trim()!=='リセット'){ toast('入力が一致しないため中止しました'); return; }
+      try { await A.resetAll(); await refresh(); toast('環境を初期化しました'); }
+      catch(e){ toast(e.message||'初期化に失敗しました'); }
+    };
   }
 
   function slug(s){
